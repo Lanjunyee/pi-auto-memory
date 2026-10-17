@@ -1,0 +1,60 @@
+import assert from "node:assert/strict";
+import { join } from "node:path";
+import test from "node:test";
+import { MemoryActivity } from "../src/pi/activity.js";
+
+const root = "/synthetic/project-memory";
+
+test("activity tracks bounded versioned returned ranges without storing body data", () => {
+  let tick = 0;
+  const activity = new MemoryActivity(() => new Date(tick++ * 1000));
+  const record = activity.bind(root).capture("model");
+  record({ kind: "read", path: join(root, "topic.md"), digest: "v1", length: 10, start: 0, end: 5 });
+  assert.equal(activity.snapshot().topics[0].complete, false);
+  record({ kind: "read", path: join(root, "topic.md"), digest: "v1", length: 10, start: 5, end: 10 });
+  assert.equal(activity.snapshot().topics[0].complete, true);
+  record({ kind: "read", path: join(root, "topic.md"), digest: "v2", length: 10, start: 5, end: 10 });
+  assert.equal(activity.snapshot().topics[0].complete, false);
+  record({ kind: "read", path: join(root, "MEMORY.md"), digest: "index", length: 10, start: 0, end: 10 });
+  record({ kind: "read", path: join(root, "empty.md"), digest: "empty", length: 0, start: 0, end: 0 });
+  assert.equal(activity.snapshot().topics.length, 1);
+  for (let i = 0; i < 22; i++) record({ kind: "read", path: join(root, `${i}.md`), digest: "v", length: 1, start: 0, end: 1 });
+  const state = activity.snapshot();
+  assert.equal(state.topics.length, 20);
+  assert.equal(state.topics[0].path, "21.md");
+  assert.equal(state.topics.at(-1)!.path, "2.md");
+  assert.equal(state.truncated, true);
+  assert.equal(JSON.stringify(state).includes("digest"), false);
+  state.topics.length = 0;
+  assert.equal(activity.snapshot().topics.length, 20);
+});
+
+test("activity preserves completed history on refresh and rejects late operations across epochs and sessions", () => {
+  const activity = new MemoryActivity(() => new Date(0));
+  const observation = activity.bind(root);
+  const old = observation.capture("user");
+  old({ kind: "save", path: join(root, "topic.md") });
+  activity.prepared(false);
+  assert.equal(activity.snapshot().phase, "prepared");
+  assert.equal(activity.snapshot().projectedAt, undefined);
+  activity.projected();
+  const projectedAt = activity.snapshot().projectedAt;
+  activity.projected();
+  assert.equal(activity.snapshot().projectedAt, projectedAt);
+  old({ kind: "save", path: join(root, "MEMORY.md") });
+  assert.equal(activity.snapshot().changed, true);
+  activity.reset("refresh");
+  old({ kind: "save", path: join(root, "late.md") });
+  assert.equal(activity.snapshot().lastSave!.path, "MEMORY.md");
+  assert.equal(activity.snapshot().phase, "refresh");
+  const current = observation.capture("model");
+  activity.pause("compatibility");
+  current({ kind: "save", path: join(root, "paused.md") });
+  assert.equal(activity.snapshot().lastSave!.path, "MEMORY.md");
+  assert.equal(activity.snapshot().fault, "compatibility");
+  activity.reset();
+  old({ kind: "save", path: join(root, "old-session.md") });
+  assert.equal(activity.snapshot().lastSave, undefined);
+  assert.equal(activity.snapshot().topics.length, 0);
+  assert.equal(activity.snapshot().phase, "initial");
+});

@@ -1,0 +1,40 @@
+{
+  "runtime": [
+    "package.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
+    "src/index.ts",
+    "src/core/atomic-file.ts", "src/core/config.ts", "src/core/constants.ts",
+    "src/core/content-policy.ts", "src/core/locks.ts", "src/core/paths.ts",
+    "src/core/project-identity.ts", "src/core/store.ts",
+    "src/pi/activity.ts", "src/pi/presentation.ts", "src/pi/commands.ts", "src/pi/doctor.ts", "src/pi/factory-path.ts", "src/pi/lifecycle.ts",
+    "src/pi/memory-guidance.ts", "src/pi/read-coverage.ts", "src/pi/registration.ts",
+    "src/pi/scan-binary.ts", "src/pi/scan-policy.ts", "src/pi/scan-process.ts", "src/pi/scans.ts",
+    "src/pi/system-section.ts", "src/pi/tools.ts", "src/pi/degraded-path.ts"
+  ],
+  "source": [
+    "package.json", "package-lock.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
+    "tsconfig.json", "distribution-files.json", "docs/release-trial.md", "docs/isolated-install-verification.md",
+    "src/index.ts",
+    "src/core/atomic-file.ts", "src/core/config.ts", "src/core/constants.ts",
+    "src/core/content-policy.ts", "src/core/locks.ts", "src/core/paths.ts",
+    "src/core/project-identity.ts", "src/core/store.ts",
+    "src/pi/activity.ts", "src/pi/presentation.ts", "src/pi/commands.ts", "src/pi/doctor.ts", "src/pi/factory-path.ts", "src/pi/lifecycle.ts",
+    "src/pi/memory-guidance.ts", "src/pi/read-coverage.ts", "src/pi/registration.ts",
+    "src/pi/scan-binary.ts", "src/pi/scan-policy.ts", "src/pi/scan-process.ts", "src/pi/scans.ts",
+    "src/pi/system-section.ts", "src/pi/tools.ts", "src/pi/degraded-path.ts",
+    "tests/activity.test.ts", "tests/activity-integration.test.ts", "tests/presentation.test.ts",
+    "tests/commands.test.ts", "tests/config.test.ts", "tests/content-policy.test.ts", "tests/degraded-path.test.ts",
+    "tests/delete.test.ts", "tests/doctor.test.ts", "tests/host-contract.test.ts", "tests/identity.test.ts",
+    "tests/lifecycle-owner.test.ts", "tests/lifecycle.test.ts", "tests/load.test.ts",
+    "tests/managed-tools.test.ts", "tests/paths.test.ts", "tests/read-coverage.test.ts",
+    "tests/registration.test.ts", "tests/scans.test.ts", "tests/store.test.ts",
+    "tests/manifest.test.ts", "tests/distribution.test.mjs",
+    "tests/readme.test.mjs", "tests/package-dependencies.test.mjs", "tests/workflow.test.mjs",
+    "tests/verification-process.test.mjs",
+    "tests/fixtures/config-worker.ts", "tests/fixtures/lifecycle-provider.ts",
+    "tests/fixtures/store-worker.ts", "tests/helpers/child.ts", "tests/helpers/store.ts",
+    "scripts/distribution.mjs", "scripts/test-package.mjs", "scripts/package-probe.mjs",
+    "scripts/package-dependencies.mjs", "scripts/check-snapshot.mjs", "scripts/verification-process.mjs",
+    "scripts/verify-isolated-install.mjs",
+    ".github/workflows/check.yml"
+  ]
+}
