@@ -66,16 +66,16 @@ flowchart LR
 
 <a id="install"></a>
 
-## 安装已发布版本（0.1.3）
+## 快速安装（0.1.4）
 
 先安装宿主 Pi，再在终端执行：
 
 ```sh
 # npm（固定版本，推荐）
-pi install npm:@lanjunyee/pi-auto-memory@0.1.3
+pi install npm:@lanjunyee/pi-auto-memory@0.1.4
 ```
 
-**当前优先使用 npm 已发布的固定版本 `0.1.3`。** 安装后，在目标项目中启动 Pi 独立主会话，即可按下节验证。
+**本次文档补丁使用 npm 固定版本 `0.1.4`。** 安装后，在目标项目中启动 Pi 独立主会话，即可按下节验证。`0.1.4` 更新 README 展示与安装说明，运行时代码及依赖与 `0.1.3` 相同。
 
 不要同时配置源码入口和安装包。**两个渠道的依赖处理不同。** npm 包在 manifest 中声明运行时依赖，安装时由 npm 一并解析；GitHub 来源拉取的是源码，不含 `node_modules`，加载前需要先在克隆目录执行 `npm ci --ignore-scripts`，否则扩展加载会因缺少 `yaml` 等模块而失败。若只求可用，选 npm 渠道。
 
@@ -85,7 +85,7 @@ pi install npm:@lanjunyee/pi-auto-memory@0.1.3
 ### 一次性试用
 
 ```sh
-pi -e npm:@lanjunyee/pi-auto-memory@0.1.3
+pi -e npm:@lanjunyee/pi-auto-memory@0.1.4
 ```
 
 不写入包配置，仍会下载／缓存包。
@@ -101,14 +101,14 @@ GitHub 默认分支的内容随 main 变化，不保证等于某个固定版本�
 ### 更新与卸载
 
 ```sh
-pi update npm:@lanjunyee/pi-auto-memory@0.1.3
+pi update npm:@lanjunyee/pi-auto-memory@0.1.4
 pi update git:github.com/Lanjunyee/pi-auto-memory
 ```
 
 更新某个已配置来源；固定版本不会自动升级到新版本。升级固定 npm 版本时先 remove 旧来源，再 install 新版本。
 
 ```sh
-pi remove npm:@lanjunyee/pi-auto-memory@0.1.3
+pi remove npm:@lanjunyee/pi-auto-memory@0.1.4
 pi remove git:github.com/Lanjunyee/pi-auto-memory
 ```
 
@@ -120,7 +120,7 @@ pi remove git:github.com/Lanjunyee/pi-auto-memory
 
 ## 首次使用：保存、查看、新独立会话验证
 
-适用于 `0.1.3`，示例只使用无秘密的稳定偏好。
+适用于 `0.1.3`／`0.1.4`，示例只使用无秘密的稳定偏好。
 
 1. **保存偏好。** 在目标项目启动 Pi，输入上方示例中的保存要求，观察模型是否调用工具保存。扩展不会在任务结束时自动总结。
 

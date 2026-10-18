@@ -6,7 +6,7 @@ test("public manifest has one explicit Pi entry and shared host peer", async () 
   const p = JSON.parse(await readFile("package.json", "utf8"));
   const lock = JSON.parse(await readFile("package-lock.json", "utf8"));
   assert.equal(p.name, "@lanjunyee/pi-auto-memory");
-  assert.equal(p.version, "0.1.3");
+  assert.equal(p.version, "0.1.4");
   assert.equal(p.private, undefined);
   assert.equal(p.license, "Apache-2.0");
   const license = await readFile("LICENSE", "utf8");

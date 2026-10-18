@@ -6,14 +6,14 @@ test('README prioritizes the verified released install and separates candidate s
   const text = await readFile('README.md', 'utf8');
   for (const phrase of [
     '核对日期 2026-10-17',
-    '当前优先使用 npm 已发布的固定版本 `0.1.3`',
+    '本次文档补丁使用 npm 固定版本 `0.1.4`',
     '`0.1.0`：已发布',
     '`0.1.1`：已发布（2026-10-16）',
     '`0.1.3`：已发布（2026-10-17），是 npm `latest` 与 GitHub 默认分支',
     '`0.1.2`：**未发布，已被 `0.1.3` 取代**',
-    'pi install npm:@lanjunyee/pi-auto-memory@0.1.3',
+    'pi install npm:@lanjunyee/pi-auto-memory@0.1.4',
     '# npm（固定版本，推荐）',
-    'pi remove npm:@lanjunyee/pi-auto-memory@0.1.3',
+    'pi remove npm:@lanjunyee/pi-auto-memory@0.1.4',
     'pi install git:github.com/Lanjunyee/pi-auto-memory',
     '本轮实际执行了 npm 安装、`pi install npm:` 渠道',
     '未调用真实模型评估保存或召回',
