@@ -409,7 +409,7 @@ test("editor conflict and off-during-edit reject; successful user edit never gra
   f.ui.editor = async () => "user edit";
   await f.run("edit topic.md");
   assert.equal(await readFile(f.path, "utf8"), "user edit");
-  assert.match(f.reports.at(-1)!, /主题文件已保存.*按需读取/);
+  assert.match(f.reports.at(-1)!, /主题文件已保存.*未核实 MEMORY\.md 关联.*按需读取/);
   await assert.rejects(f.store.write(f.path, "overwrite old model snapshot"), /stale version/);
 });
 

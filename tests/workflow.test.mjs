@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { parse } from 'yaml';
 
-test('CI is an exact read-only four-cell validation workflow', async () => {
+test('CI is an exact read-only eight-cell host-matrix validation workflow', async () => {
   const text = await readFile('.github/workflows/check.yml', 'utf8');
   const workflow = parse(text);
   assert.deepEqual(Object.keys(workflow).sort(), ['jobs', 'name', 'on', 'permissions']);
@@ -15,7 +15,9 @@ test('CI is an exact read-only four-cell validation workflow', async () => {
   assert.deepEqual(Object.keys(job).sort(), ['runs-on', 'steps', 'strategy', 'timeout-minutes']);
   assert.equal(job['runs-on'], '${{ matrix.os }}');
   assert.equal(job['timeout-minutes'], 45);
-  assert.deepEqual(job.strategy, { 'fail-fast': false, matrix: { os: ['ubuntu-24.04', 'macos-15'], node: ['22.19.0', '26.9.0'] } });
+  assert.deepEqual(job.strategy, { 'fail-fast': false, matrix: {
+    os: ['ubuntu-24.04', 'macos-15'], node: ['22.19.0', '26.9.0'], pi: ['1.2.0', '1.3.0'],
+  } });
   const tools = `set -euo pipefail
 if [[ "$RUNNER_OS" == Linux ]]; then
   sudo apt-get update
@@ -35,8 +37,8 @@ if command -v fd >/dev/null; then fd --version; else fdfind --version; fi
     { name: 'Required scan tools', shell: 'bash', run: tools },
     { name: 'Install locked dependencies', run: 'npm ci --ignore-scripts' },
     { name: 'Full checks', run: 'npm run check' },
-    { name: 'Candidate package', run: 'npm run test:package' },
-    { name: 'Public snapshot closure', run: 'node scripts/check-snapshot.mjs' },
+    { name: 'Candidate package', run: 'npm run test:package -- --host-version "${{ matrix.pi }}"' },
+    { name: 'Public snapshot closure', run: 'node scripts/check-snapshot.mjs --host-version "${{ matrix.pi }}"' },
   ]);
   assert.doesNotMatch(text, /secrets\.|pull_request_target|continue-on-error|npm publish|git push|upload-artifact/);
 });

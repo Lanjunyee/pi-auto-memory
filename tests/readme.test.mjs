@@ -2,31 +2,22 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-test('README prioritizes the verified released install and separates candidate scope', async () => {
+test('README uses unpinned package commands and explains installation channels', async () => {
   const text = await readFile('README.md', 'utf8');
   for (const phrase of [
-    '核对日期 2026-10-17',
-    '本次文档补丁使用 npm 固定版本 `0.1.4`',
-    '`0.1.0`：已发布',
-    '`0.1.1`：已发布（2026-10-16）',
-    '`0.1.3`：已发布（2026-10-17），是 npm `latest` 与 GitHub 默认分支',
-    '`0.1.2`：**未发布，已被 `0.1.3` 取代**',
-    'pi install npm:@lanjunyee/pi-auto-memory@0.1.4',
-    '# npm（固定版本，推荐）',
-    'pi remove npm:@lanjunyee/pi-auto-memory@0.1.4',
+    '## 快速安装',
+    'pi install npm:@lanjunyee/pi-auto-memory',
+    'pi -e npm:@lanjunyee/pi-auto-memory',
+    'pi update npm:@lanjunyee/pi-auto-memory',
+    'pi remove npm:@lanjunyee/pi-auto-memory',
     'pi install git:github.com/Lanjunyee/pi-auto-memory',
-    '本轮实际执行了 npm 安装、`pi install npm:` 渠道',
-    '未调用真实模型评估保存或召回',
-    '版本可获取、安装验证通过与功能存在是三件事',
     '两个渠道的依赖处理不同',
     '加载前需要先在克隆目录执行 `npm ci --ignore-scripts`',
-    '渠道状态会变化',
-    '`0.1.0`：已发布，早于 `0.1.1`；没有 `/memory list`、`/memory reload` 和 `/memory doctor`',
-  ]) assert.ok(text.includes(phrase), `Missing version/channel contract: ${phrase}`);
-  assert.doesNotMatch(text, /pi install npm:@lanjunyee\/pi-auto-memory@0\.1\.[02]|pi -e npm:@lanjunyee\/pi-auto-memory@0\.1\.[02]|pi update npm:@lanjunyee\/pi-auto-memory@0\.1\.[02]|pi remove npm:@lanjunyee\/pi-auto-memory@0\.1\.[02]/);
+  ]) assert.ok(text.includes(phrase), `Missing installation contract: ${phrase}`);
+  assert.doesNotMatch(text, /npm:@lanjunyee\/pi-auto-memory@/);
 });
 
-test('README places first-use tutorial before development and explains candidate-only summary', async () => {
+test('README places first-use tutorial before development and explains memory usage boundaries', async () => {
   const text = await readFile('README.md', 'utf8');
   const tutorial = text.indexOf('## 首次使用：保存、查看、新独立会话验证');
   const development = text.indexOf('## 开发与验证');
@@ -60,7 +51,7 @@ test('README places first-use tutorial before development and explains candidate
     '不保存正文、候选秘密或模型推断',
     '不会额外读取正文、扫描文件或增加模型调用',
     '请记住：今后本项目发布说明使用中文，按变更/验证/风险组织，请保存项目记忆',
-    '请为本次候选写一段发布说明',
+    '为这次缓存调整写一份简短发布说明',
     '不是 OS 安全沙箱',
     '不能保证识别所有秘密',
     'Copyright 2026 Lanjunyee',
@@ -74,7 +65,7 @@ test('README and release trial state the hosted CI scope without claiming model 
   const trial = await readFile('docs/release-trial.md', 'utf8');
   for (const phrase of [
     '`2b3452fcfe6bdfb23791e80a50324f5ad7ad3d61`',
-    'run `39045640235` 四格全部成功',
+    'run `39045640235` 当时四格全部成功',
     '不等于当前开发树、真实模型效果、中文界面或 Linux 本地手工验收',
     'Linux 的自动化检查已由 GitHub hosted CI 在 ubuntu-24.04 上覆盖',
   ]) assert.ok(readme.includes(phrase), `Missing hosted CI scope: ${phrase}`);
@@ -87,10 +78,9 @@ test('README and release trial state the hosted CI scope without claiming model 
 test('release trial guide documents Chinese expectations without claiming this round passed', async () => {
   const text = await readFile('docs/release-trial.md', 'utf8');
   for (const phrase of [
-    '`0.1.3` 已发布到 npm 与 GitHub',
-    '`0.1.2` 未单独发布，其能力并入 `0.1.3`',
+    '`0.2.0` 相对 `0.1.4` 更新保存／索引反馈',
     '没有重新实测本文全部手工步骤',
-    '`0.1.1` 已包含 `/memory list` 和 `/memory reload`，没有 `/memory doctor`',
+    '`0.2.0` 已发布到 npm 与 GitHub',
     '本轮没有执行真实模型调用',
     '同一 agentDir（Pi 用户目录）下的所有项目共用开关',
     '本扩展不提供撤销',

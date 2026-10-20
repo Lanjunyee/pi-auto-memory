@@ -86,7 +86,9 @@ test("save notes distinguish index activation, limits and on-demand topics", () 
   const topic = formatSave("Saved successfully.", "/project/topics/note.md");
   assert.match(topic, /主题文件已保存/);
   assert.match(topic, /按需读取/);
-  assert.doesNotMatch(topic, /reload|注入当前请求成功/);
+  assert.match(topic, /未核实 MEMORY\.md 关联/);
+  assert.match(topic, /检查已有入口/);
+  assert.doesNotMatch(topic, /reload|注入当前请求成功|关联完整/);
   const failed = formatSave("Saved successfully.", "/project/topics/note.md");
   assert.equal(failed.includes("Saved successfully"), false);
   assert.match(faultSummary(new Error("Memory paused: incompatible tool override.")), /工具兼容性冲突.*按顺序恢复/);

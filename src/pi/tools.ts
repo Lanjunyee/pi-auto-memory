@@ -24,15 +24,18 @@ type Save = ReturnType<typeof savedResult>;
 type StoreProvider = MemoryStore | ((ctx: ExtensionToolContext) => Promise<MemoryStore>);
 
 function managedError(error: unknown): Error {
-  const message = error instanceof Error && error.message.startsWith("Memory ")
-    ? error.message : "Memory operation failed; reread the file and retry. No successful save was reported.";
+  const message = error instanceof Error
+    ? error.message.startsWith("Memory ") ? error.message
+      : (error as NodeJS.ErrnoException).code === "ENOENT" ? "Memory file not found; it does not exist yet and may be created."
+        : "Memory operation failed; reread the file and retry. No successful save was reported."
+    : "Memory operation failed; reread the file and retry. No successful save was reported.";
   return new Error(message);
 }
 
 function saveTiming(path: string): string {
   return basename(path) === "MEMORY.md"
     ? "磁盘索引已保存，当前快照不会自动更新；执行 /memory reload 后将在下一条用户任务时重载。"
-    : "主题已保存，仍由模型按需读取；保存不代表已注入或必然遵循。";
+    : "主题已保存；本次保存未核实 MEMORY.md 关联。请检查已有入口，仅在缺失或过时时更新；主题仍由模型按需读取，保存不代表已注入或必然遵循。";
 }
 
 function savedToolResult<T>(result: AgentToolResult<T>, saved: Save, path: string): AgentToolResult<T> {

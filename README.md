@@ -5,7 +5,7 @@
 <p><strong>让 Pi 记住项目偏好，减少跨会话的重复说明。</strong></p>
 
 <p>
-  <a href="https://www.npmjs.com/package/@lanjunyee/pi-auto-memory"><img src="https://img.shields.io/npm/v/%40lanjunyee%2Fpi-auto-memory?style=flat-square&amp;label=npm" alt="npm 最新版本"></a>
+  <a href="https://www.npmjs.com/package/@lanjunyee/pi-auto-memory"><img src="https://img.shields.io/badge/npm-install-CB3837?style=flat-square&amp;logo=npm" alt="npm 安装"></a>
   <a href="https://github.com/Lanjunyee/pi-auto-memory/actions/workflows/check.yml"><img src="https://github.com/Lanjunyee/pi-auto-memory/actions/workflows/check.yml/badge.svg?branch=main" alt="main 分支 CI 状态"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="许可证 Apache-2.0"></a>
 </p>
@@ -66,16 +66,15 @@ flowchart LR
 
 <a id="install"></a>
 
-## 快速安装（0.1.4）
+## 快速安装
 
-先安装宿主 Pi，再在终端执行：
+先安装宿主 Pi，再在终端通过 npm 安装：
 
 ```sh
-# npm（固定版本，推荐）
-pi install npm:@lanjunyee/pi-auto-memory@0.1.4
+pi install npm:@lanjunyee/pi-auto-memory
 ```
 
-**本次文档补丁使用 npm 固定版本 `0.1.4`。** 安装后，在目标项目中启动 Pi 独立主会话，即可按下节验证。`0.1.4` 更新 README 展示与安装说明，运行时代码及依赖与 `0.1.3` 相同。
+默认安装最新发布版本。安装后，在目标项目中启动 Pi 独立主会话，即可按下节验证。
 
 不要同时配置源码入口和安装包。**两个渠道的依赖处理不同。** npm 包在 manifest 中声明运行时依赖，安装时由 npm 一并解析；GitHub 来源拉取的是源码，不含 `node_modules`，加载前需要先在克隆目录执行 `npm ci --ignore-scripts`，否则扩展加载会因缺少 `yaml` 等模块而失败。若只求可用，选 npm 渠道。
 
@@ -85,7 +84,7 @@ pi install npm:@lanjunyee/pi-auto-memory@0.1.4
 ### 一次性试用
 
 ```sh
-pi -e npm:@lanjunyee/pi-auto-memory@0.1.4
+pi -e npm:@lanjunyee/pi-auto-memory
 ```
 
 不写入包配置，仍会下载／缓存包。
@@ -96,19 +95,19 @@ pi -e npm:@lanjunyee/pi-auto-memory@0.1.4
 pi install git:github.com/Lanjunyee/pi-auto-memory
 ```
 
-GitHub 默认分支的内容随 main 变化，不保证等于某个固定版本；加载前先在克隆目录准备依赖。
+GitHub 来源使用 main 分支上的源码；加载前先在克隆目录准备依赖。
 
 ### 更新与卸载
 
 ```sh
-pi update npm:@lanjunyee/pi-auto-memory@0.1.4
+pi update npm:@lanjunyee/pi-auto-memory
 pi update git:github.com/Lanjunyee/pi-auto-memory
 ```
 
-更新某个已配置来源；固定版本不会自动升级到新版本。升级固定 npm 版本时先 remove 旧来源，再 install 新版本。
+更新时使用原来安装的来源：npm 来源获取最新发布版本，GitHub 来源获取最新源码。
 
 ```sh
-pi remove npm:@lanjunyee/pi-auto-memory@0.1.4
+pi remove npm:@lanjunyee/pi-auto-memory
 pi remove git:github.com/Lanjunyee/pi-auto-memory
 ```
 
@@ -120,23 +119,23 @@ pi remove git:github.com/Lanjunyee/pi-auto-memory
 
 ## 首次使用：保存、查看、新独立会话验证
 
-适用于 `0.1.3`／`0.1.4`，示例只使用无秘密的稳定偏好。
+示例使用不含敏感信息的稳定偏好。
 
 1. **保存偏好。** 在目标项目启动 Pi，输入上方示例中的保存要求，观察模型是否调用工具保存。扩展不会在任务结束时自动总结。
 
-2. **查看文件。** 执行 `/memory list`，选择 `MEMORY.md` 和对应主题，核对“中文、变更/验证/风险”等内容。只读查看不会替模型建立读取许可；空列表表示尚无已保存文件。
+2. **查看文件。** 执行 `/memory list`，选择 `MEMORY.md` 和对应主题，核对“中文、变更/验证/风险”等内容。主题已保存不等于索引已关联；核对 `MEMORY.md` 中是否有指向该主题的链接和描述，缺失时可在新任务中要求模型补齐。只读查看不会替模型建立读取许可；空列表表示尚无已保存文件。
 
-3. **新会话验证。** 退出后在**同一个项目**启动新的独立主会话，**不要重复偏好原文**。例如：“请为本次候选写一段发布说明，说明新增 doctor 和会话摘要，并列出验证方式和已知风险。”核对回答是否使用目标结构；不复用旧会话、fork 或子代理。
+3. **新会话验证。** 退出后在**同一个项目**启动新的独立主会话，**不要重复偏好原文**。例如：“为这次缓存调整写一份简短发布说明，已补充测试，极端输入仍需观察。”核对回答是否使用目标结构；不复用旧会话、fork 或子代理。
 
 三类结果与排查入口：
 
 | 现象 | 可能原因与下一步 |
 | --- | --- |
-| 没有保存 | 模型判断无需保存、保存被拒绝、开关关闭或环境不支持。先用 list 检查文件；`0.1.3` 可运行 doctor，并查看下文提交拒绝表。不要假设每轮都会保存。 |
+| 没有保存 | 模型判断无需保存、保存被拒绝、开关关闭或环境不支持。先用 `/memory list` 检查文件，再用 `/memory doctor` 检查运行条件，并查看下文提交拒绝表。不要假设每轮都会保存。 |
 | 已保存但新会话没有使用 | 主题按需读取，模型可能没有读取；也可能记忆关闭、配置未知、兼容暂停或索引没有链接该主题。检查 status、开关和索引内容；`/memory doctor` 可报告运行条件。 |
 | 读取后没有遵循 | 记忆只是参考数据，当前用户指令优先；模型可能忽略或判断不适用。status 摘要只能说明正文是否曾返回，不能证明模型理解或遵循。 |
 
-真实模型的保存与召回具有随机性，一次示例不能作为离线管理验收或必然成功证明。隔离试用只验证管理界面，见“版本差异与隔离试用”。
+真实模型的保存与召回具有随机性，一次示例不能作为离线管理验收或必然成功证明。隔离试用只验证管理界面，见下文“隔离试用”。
 
 <a id="commands"></a>
 
@@ -175,7 +174,7 @@ pi remove git:github.com/Lanjunyee/pi-auto-memory
 
 `/memory status` 提供简短状态摘要，并展示当前实例的会话使用摘要。诊断结果包含稳定检查标识和 `ok`（正常）、`warning`（警告）、`failure`（失败）、`unchecked`（未检查），保留命令语法与诊断标识。
 
-`0.1.1` 的管理文字为英文。`0.1.3` 新增简体中文的菜单、用法、状态、开关、通知和诊断原因；命令名、诊断标识、错误分类和普通文件的宿主输出保持原有语义。
+菜单、用法、状态、开关、通知和诊断原因使用简体中文；命令名、诊断标识、错误分类和普通文件的宿主输出保持原有语义。
 
 `/memory list` 与 TUI 菜单的 `List files` 使用同一文件列表，按相对路径列出索引和嵌套主题，不跟随符号链接、不读取未选中文件正文；空目录只提示暂无文件。交互时选中即只读查看，关闭后重新列举，取消列表退出；查看 `MEMORY.md` 请直接选择该文件，没有独立 view 子命令。查看界面中的改动不会保存或以查看建立模型读取许可。
 
@@ -216,7 +215,7 @@ pi remove git:github.com/Lanjunyee/pi-auto-memory
 </details>
 
 <details>
-<summary><strong>status 会话摘要：展示事实与边界（0.1.3 起）</strong></summary>
+<summary><strong>status 会话摘要：展示事实与边界</strong></summary>
 
 status 提供**仅存于当前扩展实例内存**的使用摘要，只展示已经发生的事实：
 
@@ -239,36 +238,7 @@ status 提供**仅存于当前扩展实例内存**的使用摘要，只展示已
 </details>
 
 <details>
-<summary><strong>版本历史、发布校验与隔离试用</strong></summary>
-
-### 版本状态（核对日期 2026-10-17）
-
-以下渠道一致性与零模型安装验收记录属于该核对时点。
-
-`0.1.3` 同时发布到 npm 与 GitHub，两者内容逐字节一致：npm tarball SHA256 为 `6d9c996cf5d056f217ecf35a9e55ddc9115095d5c5c17a11634c2fdf62f2af11`，公开源码树指纹为 `cd5c9dbfa41661a0bd2e3f170abe135616e0422d`。本轮实际执行了 npm 安装、`pi install npm:` 渠道、受管理写入与读取、普通文件委托和卸载保留，全部通过，模型调用为 0；未调用真实模型评估保存或召回。
-
-- `0.1.0`：已发布，早于 `0.1.1`；没有 `/memory list`、`/memory reload` 和 `/memory doctor`。
-- `0.1.1`：已发布（2026-10-16）；新增 `/memory list` 只读浏览和 `/memory reload` 延迟刷新，没有 `/memory doctor` 和会话使用摘要。
-- `0.1.2`：**未发布，已被 `0.1.3` 取代**；该候选新增 `/memory doctor`、会话 status 摘要和简体中文管理反馈，未单独发布。
-- `0.1.3`：已发布（2026-10-17），是 npm `latest` 与 GitHub 默认分支；在 `0.1.2` 候选基础上修复存储初始化故障的扩散、失败粘滞与状态展示，并把宿主版本判定改为范围比较。
-
-版本可获取、安装验证通过与功能存在是三件事。渠道状态会变化；重新发布或更新文档前应再次核对并记录日期。更细的版本功能差异见下文“版本差异与隔离试用”。
-
-### 版本差异与隔离试用
-
-`0.1.3` 已发布到 npm 与 GitHub，两个渠道内容逐字节一致。`0.1.3` 之前，`0.1.2` 候选未单独发布，其能力并入 `0.1.3`。
-
-| 能力 | 0.1.0 | 0.1.1 | 0.1.3 |
-| --- | --- | --- | --- |
-| status / on / off / edit / delete | 有 | 有 | 有 |
-| `/memory list` 只读浏览 | 无 | 有 | 有 |
-| `/memory reload` 延迟刷新 | 无 | 有 | 有 |
-| `/memory doctor` 只读诊断 | 无 | 无 | 有 |
-| status 会话使用摘要 | 无 | 无 | 有 |
-| 中文管理反馈 | 无 | 无 | 有 |
-| 宿主版本按范围判定 | 无 | 无 | 声明 1.2.0–1.3.0 范围 |
-| 存储故障不拖垮普通工具 | 无 | 无 | 有 |
-| 初始化失败不跨调用缓存 | 无 | 无 | 有 |
+<summary><strong>隔离试用</strong></summary>
 
 隔离试用步骤见 [隔离试用指南](https://github.com/Lanjunyee/pi-auto-memory/blob/main/docs/release-trial.md)。该指南**仅随公开源码分发，npm 包内不包含 `docs/`**，因此从 npm 安装时请以本文档为准。该试用只检查 `/memory` 菜单、开关、编辑和删除等离线管理能力，不能证明真实模型保存、召回或跨会话遵循；真实模型调用需要用户自行选择模型、认证并承担费用。
 
@@ -343,13 +313,15 @@ npm ci --ignore-scripts
 npm run typecheck
 npm test
 npm run check
-npm run test:package
-node scripts/check-snapshot.mjs
+npm run test:package -- --host-version 1.3.0
+node scripts/check-snapshot.mjs --host-version 1.3.0
 ```
+
+包级命令接受 `--host-version 1.2.0|1.3.0`，默认 1.2.0；指定的宿主会被实际安装并核对，非法版本在下载前失败。
 
 测试只使用临时目录，不读用户凭据，不注册日常扩展，不调用模型。`tests/load.test.ts` 显式隔离加载；`tests/host-contract.test.ts` 比较标准工具 schema/行为，并验证命名 system section。离线测试不等于真实模型体验、中文界面验收或跨平台兼容证明。
 
-CI 配置覆盖 ubuntu-24.04／macos-15 × Node 22.19.0／26.9.0，先准备并确认 Git、rg、fd／fdfind，再执行锁文件安装、`npm run check`、`npm run test:package` 和 `node scripts/check-snapshot.mjs`。后者在逐文件公开副本上重新安装依赖并运行完整检查和包级验证。工作流契约由 `tests/workflow.test.mjs` 静态检查。公开提交 `2b3452fcfe6bdfb23791e80a50324f5ad7ad3d61`（对应 `0.1.3`）的 hosted CI run `39045640235` 四格全部成功，其中每格的上列检查步骤均为 success；这是该提交的自动化检查证据，不等于当前开发树、真实模型效果、中文界面或 Linux 本地手工验收。工作流不发布、不写仓库、不请求秘密或调用模型。
+CI 配置覆盖 ubuntu-24.04／macos-15 × Node 22.19.0／26.9.0 × Pi 1.2.0／1.3.0 八个组合，先准备并确认 Git、rg、fd／fdfind，再执行锁文件安装、`npm run check`、带对应宿主参数的 `npm run test:package` 和 `node scripts/check-snapshot.mjs`。后者在逐文件公开副本上重新安装依赖并运行完整检查和包级验证。工作流契约由 `tests/workflow.test.mjs` 静态检查。公开提交 `2b3452fcfe6bdfb23791e80a50324f5ad7ad3d61` 的 hosted CI run `39045640235` 当时四格全部成功；该历史结果早于本矩阵扩展，不代表新增宿主组合已经运行，也不能替代当前开发树的验收。不等于当前开发树、真实模型效果、中文界面或 Linux 本地手工验收。工作流不发布、不写仓库、不请求秘密或调用模型。
 
 ## 许可与分发验证
 
@@ -368,6 +340,6 @@ node scripts/distribution.mjs snapshot /tmp/auto-memory-public-source
 shasum -a 256 /tmp/auto-memory-package-output/*.tgz
 ```
 
-包级隔离验证命令见 `npm run test:package`；它安装独立固定宿主及声明依赖，需要网络，只使用临时 HOME／agentDir 和合成记忆，模型调用为零。验证覆盖本次真实 tarball 的解包、本地／Git 来源及 npm 提升依赖布局，安装文件逐一与候选归档比对，成功或失败均清理本次临时资源。候选布局 fixture 不等于 registry 发布验收，也不以已发布旧包替代当前候选。验证工具不包含发布命令。公开目录发现依赖 `pi-package` 元数据，不保证官网收录时效或官方背书。
+包级隔离验证命令见 `npm run test:package -- --host-version <1.2.0|1.3.0>`；它安装所选独立宿主及声明依赖，需要网络，只使用临时 HOME／agentDir 和合成记忆，模型调用为零。验证覆盖本次真实 tarball 的解包、本地／Git 来源及 npm 提升依赖布局，安装文件逐一与候选归档比对，成功或失败均清理本次临时资源。候选布局 fixture 不等于 registry 发布验收，也不以已发布旧包替代当前候选。验证工具不包含发布命令。公开目录发现依赖 `pi-package` 元数据，不保证官网收录时效或官方背书。
 
 </details>

@@ -29,6 +29,7 @@
     "tests/registration.test.ts", "tests/scans.test.ts", "tests/store.test.ts",
     "tests/manifest.test.ts", "tests/distribution.test.mjs",
     "tests/readme.test.mjs", "tests/package-dependencies.test.mjs", "tests/workflow.test.mjs",
+    "tests/host-matrix.test.mjs",
     "tests/verification-process.test.mjs",
     "tests/fixtures/config-worker.ts", "tests/fixtures/lifecycle-provider.ts",
     "tests/fixtures/store-worker.ts", "tests/helpers/child.ts", "tests/helpers/store.ts",

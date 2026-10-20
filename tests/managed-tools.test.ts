@@ -81,7 +81,10 @@ test("memory write/edit validate final text and preserve old bytes on secret or 
     const ctx = { cwd: root } as ExtensionToolContext;
     const path = join(store.paths.projectDir, "topic.md");
     const text = "\uFEFF---\r\ntype: feedback\r\nreference: keep\r\n---\r\nalpha\r\nbeta\r\n";
-    await tools.write.execute("w", { path, content: text }, undefined, undefined, ctx);
+    const first = await tools.write.execute("w", { path, content: text }, undefined, undefined, ctx);
+    assert.match(JSON.stringify(first.content), /\u4E3B\u9898\u5DF2\u4FDD\u5B58/);
+    assert.match(JSON.stringify(first.content), /\u672A\u6838\u5B9E MEMORY\.md \u5173\u8054/);
+    assert.match(JSON.stringify(first.content), /\u68C0\u67E5\u5DF2\u6709\u5165\u53E3/);
     assert.match(await readFile(path, "utf8"), /modified: /);
     await tools.read.execute("r", { path }, undefined, undefined, ctx);
     await tools.edit.execute("e", { path, edits: [{ oldText: "alpha", newText: "gamma" }, { oldText: "beta", newText: "delta" }] }, undefined, undefined, ctx);
@@ -182,6 +185,68 @@ test("unknown classification errors never authorize default IO", async (t) => {
       assert.equal(await readFile(target, "utf8"), "original");
       mocked.mock.restore();
     }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a missing memory file reports that it can be created instead of a generic operation failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-wrapper-missing-"));
+  try {
+    const store = await makeStore(join(root, "agent"));
+    const tools = managedFileTools(root, store);
+    const ctx = { cwd: root } as ExtensionToolContext;
+    const error = await tools.read.execute("missing", { path: join(store.paths.projectDir, "MEMORY.md") }, undefined, undefined, ctx)
+      .catch((value: Error) => value);
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /Memory file not found/);
+    assert.doesNotMatch(error.message, /No successful save was reported/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a saved topic followed by a stale index edit keeps the topic and reports the index step as incomplete", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-wrapper-partial-"));
+  try {
+    const store = await makeStore(join(root, "agent"));
+    const tools = managedFileTools(root, store);
+    const ctx = { cwd: root } as ExtensionToolContext;
+    const topic = join(store.paths.projectDir, "topics/partial.md");
+    const index = join(store.paths.projectDir, "MEMORY.md");
+    await tools.write.execute("index", { path: index, content: "# Memory\n\n- [old](topics/old.md): old entry\n" }, undefined, undefined, ctx);
+    await tools.read.execute("read-index", { path: index }, undefined, undefined, ctx);
+    const topicResult = await tools.write.execute("topic", { path: topic, content: "durable topic" }, undefined, undefined, ctx);
+    assert.equal(topicResult.isError, false);
+    assert.match(JSON.stringify(topicResult.content), /主题已保存/);
+    const other = await makeStore(join(root, "agent"));
+    await other.readFull(index);
+    await other.write(index, "# Memory\n\n- [concurrent](topics/concurrent.md): concurrent entry\n");
+    const edited = await tools.edit.execute("stale-index", { path: index, edits: [{ oldText: "old entry", newText: "partial entry" }] }, undefined, undefined, ctx).catch((error: Error) => error);
+    assert.ok(edited instanceof Error);
+    assert.match(edited.message, /stale version/);
+    assert.equal(await readFile(topic, "utf8"), "durable topic");
+    assert.match(await readFile(index, "utf8"), /concurrent entry/);
+    assert.doesNotMatch(await readFile(index, "utf8"), /partial entry/);
+    await tools.read.execute("read-index-again", { path: index }, undefined, undefined, ctx);
+    const retried = await tools.edit.execute("retry-index", { path: index, edits: [{ oldText: "concurrent entry", newText: "partial entry" }] }, undefined, undefined, ctx);
+    assert.equal(retried.isError, false);
+    assert.match(await readFile(index, "utf8"), /partial entry/);
+    assert.equal(await readFile(topic, "utf8"), "durable topic");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a closed store during the index step leaves the saved topic and never claims overall success", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-wrapper-closed-"));
+  try {
+    const store = await makeStore(join(root, "agent"));
+    const tools = managedFileTools(root, store);
+    const ctx = { cwd: root } as ExtensionToolContext;
+    const topic = join(store.paths.projectDir, "topics/closed.md");
+    const index = join(store.paths.projectDir, "MEMORY.md");
+    await tools.write.execute("topic", { path: topic, content: "kept after close" }, undefined, undefined, ctx);
+    await store.config.setEnabled(false);
+    const closed = await tools.write.execute("index", { path: index, content: "# Memory\n\n- [closed](topics/closed.md): entry\n" }, undefined, undefined, ctx).catch((error: Error) => error);
+    assert.ok(closed instanceof Error);
+    assert.match(closed.message, /Memory is off/);
+    assert.equal(await readFile(topic, "utf8"), "kept after close");
+    await assert.rejects(readFile(index), { code: "ENOENT" });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

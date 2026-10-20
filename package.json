@@ -1,25 +1,52 @@
 {
   "name": "@lanjunyee/pi-auto-memory",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Project-scoped file memory for Pi coding agent sessions",
   "license": "Apache-2.0",
-  "repository": { "type": "git", "url": "git+https://github.com/Lanjunyee/pi-auto-memory.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lanjunyee/pi-auto-memory.git"
+  },
   "homepage": "https://github.com/Lanjunyee/pi-auto-memory#readme",
-  "bugs": { "url": "https://github.com/Lanjunyee/pi-auto-memory/issues" },
-  "keywords": ["pi-package", "pi-extension", "memory"],
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
-  "pi": { "extensions": ["./src/index.ts"] },
-  "files": ["src/**/*.ts", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "bugs": {
+    "url": "https://github.com/Lanjunyee/pi-auto-memory/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "memory"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "files": [
+    "src/**/*.ts",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "type": "module",
-  "engines": { "node": ">=22.19.0" },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:package": "node scripts/test-package.mjs",
     "check": "npm run typecheck && npm test"
   },
-  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
-  "dependencies": { "proper-lockfile": "4.1.2", "yaml": "2.9.1" },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "dependencies": {
+    "proper-lockfile": "4.1.2",
+    "yaml": "2.9.1"
+  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.2.0",
     "@types/node": "^22.19.0",

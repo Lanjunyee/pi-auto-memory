@@ -6,6 +6,15 @@ import { join, resolve, dirname } from 'node:path';
 import { pack, policy, readArchive, prepareSnapshot } from './distribution.mjs';
 
 const source = resolve('.');
+const HOST_VERSIONS = ['1.2.0', '1.3.0'];
+const args = process.argv.slice(2);
+let hostVersion = '1.2.0';
+for (let index = 0; index < args.length; index += 1) {
+  if (args[index] !== '--host-version' || index + 1 >= args.length) throw new Error('Usage: node scripts/test-package.mjs [--host-version 1.2.0|1.3.0]');
+  hostVersion = args[index + 1];
+  index += 1;
+}
+if (!HOST_VERSIONS.includes(hostVersion)) throw new Error(`Unsupported host version: ${hostVersion}; expected ${HOST_VERSIONS.join(' or ')}`);
 const root = await mkdtemp(join(tmpdir(), 'auto-memory-package-'));
 console.log(`Isolated verification directory: ${root}`);
 try {
@@ -25,9 +34,9 @@ function run(command, args, cwd, extra = {}) {
 const host = join(root, 'host');
 await mkdir(host);
 await writeFile(join(host, 'package.json'), '{"private":true,"type":"module"}');
-await run('npm', ['install', '--ignore-scripts', '--legacy-peer-deps', '@earendil-works/pi-coding-agent@1.2.0'], host);
+await run('npm', ['install', '--ignore-scripts', '--legacy-peer-deps', `@earendil-works/pi-coding-agent@${hostVersion}`], host);
 const hostManifest = JSON.parse(await readFile(join(host, 'node_modules/@earendil-works/pi-coding-agent/package.json'), 'utf8'));
-assert.equal(hostManifest.version, '1.2.0');
+assert.equal(hostManifest.version, hostVersion, 'Installed host version must match the requested version');
 const cli = join(host, 'node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js');
 const probe = join(host, 'probe.mjs');
 await cp(join(source, 'scripts/package-probe.mjs'), probe);
@@ -52,7 +61,7 @@ async function fixture(label) {
 }
 function pi(f, args) { return run(process.execPath, [cli, ...args], f.cwd, f.extra); }
 async function check(f, expectation = 'ok') {
-  const output = await run(process.execPath, [probe, f.cwd, f.agentDir, expectation, ...(f.dependencyRoot ? [f.dependencyRoot] : [])], f.cwd, f.extra);
+  const output = await run(process.execPath, [probe, f.cwd, f.agentDir, expectation, ...(f.dependencyRoot ? [f.dependencyRoot] : [])], f.cwd, { ...f.extra, PI_PROBE_HOST_ROOT: host });
   console.log(output.trim());
 }
 const local = await fixture('local');
@@ -97,7 +106,7 @@ await pi(git, ['install', gitSpec]);
 await check(git);
 await pi(git, ['remove', gitSpec]);
 await check(git, 'removed');
-console.log(JSON.stringify({ result: 'pass', host: hostManifest.version, artifactSha256: artifact.sha256,
+console.log(JSON.stringify({ result: 'pass', host: hostManifest.version, requestedHost: hostVersion, artifactSha256: artifact.sha256,
   cases: ['tarball production-only load', 'local package install/remove', 'missing source rejected', 'missing dependencies rejected', 'candidate tarball npm hoisted layout install/remove with byte comparison', 'Git package install dependencies/remove'],
   modelCalls: 0, cleanup: 'temporary resources removed on exit' }, null, 2));
 } finally {

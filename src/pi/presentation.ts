@@ -70,6 +70,7 @@ function classify(error: unknown): Classification {
     if (message.startsWith("Memory target must be")) return { text: "目标必须是当前项目的相对文件名，不允许绝对路径或“..”。", doctor: false };
     if (message.startsWith("Memory target changed")) return { text: "目标在执行期间发生变化。", advice: "请重新读取后重试。", doctor: false };
     if (message.startsWith("Memory file disappeared")) return { text: "记忆文件已消失，无法查看；请重新打开列表。", doctor: false };
+    if (message.startsWith("Memory file not found")) return { text: "记忆文件尚不存在，可以直接创建。", advice: "请按需要新建主题或索引文件。", doctor: false };
     if (message.startsWith("Memory file is no longer available")) return { text: "记忆文件已不可用；请重新打开列表。", doctor: false };
     if (message.startsWith("Memory parent is not a directory")) return { text: "记忆路径的父级不是目录；请检查路径。", advice: "请确认项目记忆路径未被替换。", doctor: true };
     if (message.startsWith("Memory edit requires")) return { text: "编辑需要交互式编辑器（TUI 或 RPC），未改动文件。", doctor: false };
@@ -103,7 +104,7 @@ export function userError(error: unknown, operation?: string): string {
 }
 
 export function formatSave(note: string, path: string): string {
-  if (basename(path) !== "MEMORY.md") return "主题文件已保存；主题仍由模型按需读取，保存不代表已注入当前请求或必然被召回。";
+  if (basename(path) !== "MEMORY.md") return "主题文件已保存；本次保存未核实 MEMORY.md 关联。请检查已有入口，仅在缺失或过时时更新；主题仍由模型按需读取，保存不代表已注入当前请求或必然被召回。";
   if (/exceeds 200 lines or 25KiB/.test(note)) return "索引文件已保存，但超过 200 行或 25KiB 上限，无法完整加载。请精简索引；执行 /memory reload 后下一条用户任务生效。";
   if (/near its 200-line/.test(note)) return "索引文件已保存，但接近 200 行 / 25KiB 上限，建议精简。当前快照不会自动更新；执行 /memory reload 后下一条用户任务生效。";
   return "索引文件已保存。当前快照不会自动更新；执行 /memory reload 后，下一条用户任务会重载索引。";
