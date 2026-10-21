@@ -37,7 +37,7 @@ if command -v fd >/dev/null; then fd --version; else fdfind --version; fi
     { name: 'Required scan tools', shell: 'bash', run: tools },
     { name: 'Install locked dependencies', run: 'npm ci --ignore-scripts' },
     { name: 'Full checks', run: 'npm run check' },
-    { name: 'Candidate package', run: 'npm run test:package -- --host-version "${{ matrix.pi }}"' },
+    { name: 'Candidate package', run: 'npm run test:package -- --host-version "${{ matrix.pi }}" ${{ matrix.pi == \'1.3.0\' && matrix.node == \'22.19.0\' && \'--host-regression --tui\' || \'\' }}' },
     { name: 'Public snapshot closure', run: 'node scripts/check-snapshot.mjs --host-version "${{ matrix.pi }}"' },
   ]);
   assert.doesNotMatch(text, /secrets\.|pull_request_target|continue-on-error|npm publish|git push|upload-artifact/);

@@ -2,6 +2,8 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { indexPrefix } from "../core/content-policy.js";
+import { checkIndex, formatCheck } from "../core/index-check.js";
+import { formatReview, reviewTopic } from "../core/topic-review.js";
 import { MemoryStore } from "../core/store.js";
 import type { MemoryRuntime } from "./registration.js";
 import { diagnoseMemory, formatDoctor } from "./doctor.js";
@@ -15,11 +17,15 @@ export interface CommandOptions {
   lifecycleState?: () => { loaded: boolean; fault?: string };
   resetLifecycle?: (reason?: "refresh" | "toggle") => void;
 }
-const usage = "用法：/memory status | doctor | on | off | list | reload | edit <项目内相对文件> | delete <项目内相对文件>。交互式 /memory 打开菜单。list 选择文件进行只读查看；无界面或记忆关闭时只报告文件名。delete 需要确认，不提供 force 或全部清除选项。";
-const scope = (agentDir: string) => `开关范围：同一 Pi 用户目录（agentDir）下所有项目；记忆文件按项目隔离；其他会话在下一任务或访问检查时感知变化。当前 agentDir：${agentDir}。`;
+const usage = "用法：/memory status | doctor | on | off | list | reload | edit <项目内相对文件> | delete <项目内相对文件> | check [项目内相对主题文件] | review [项目内相对主题文件] | project status|off|inherit。交互式 /memory 打开菜单。list 选择文件进行只读查看；无界面或记忆关闭时只报告文件名。delete 需要确认，不提供 force 或全部清除选项。";
+const scope = (agentDir: string) => `开关范围：全局开关作用于同一 Pi 用户目录（agentDir）下所有项目；项目设置只影响当前项目身份及其 worktree。其他会话在下一任务或访问检查时感知变化。当前 agentDir：${agentDir}。`;
 const manualNote = "手工修改在下一次加载时生效；/memory reload 将刷新安排到下一条用户任务，并使旧的受管理读取与待提交编辑或保存失效。关闭记忆会保留文件；关闭或刷新后历史上下文仍保留。";
 const summaryScope = "摘要范围：仅当前扩展实例在本会话观察到的活动；外部写入不可见；不代表模型理解或遵循记忆。";
-const operationNames: Record<string, string> = { status: "状态查询", doctor: "诊断", list: "文件列表", reload: "刷新", edit: "编辑", delete: "删除", on: "开启记忆", off: "关闭记忆" };
+const operationNames: Record<string, string> = { status: "状态查询", doctor: "诊断", list: "文件列表", reload: "刷新", edit: "编辑", delete: "删除", on: "开启记忆", off: "关闭记忆", project: "项目设置", check: "关联检查", review: "审阅" };
+const menuOperations = new Map([
+  ["列出文件", "list"], ["刷新", "reload"], ["状态", "status"], ["诊断", "doctor"],
+  ["开启全部项目", "on"], ["关闭全部项目", "off"], ["项目设置", "project"], ["关联检查", "check"], ["审阅记忆", "review"], ["编辑文件", "edit"], ["删除文件", "delete"],
+]);
 
 class CommandError extends Error {}
 
@@ -115,12 +121,11 @@ export function registerCommands(pi: ExtensionAPI, runtime: MemoryRuntime, optio
             }
           } catch { lines.push("部分状态或项目信息不可用；可选择“诊断”查看。"); }
           context.assertCurrent();
-          const choice = await ctx.ui.select(lines.join("\n"), ["列出文件", "刷新", "状态", "诊断", "开启", "关闭", "编辑文件", "删除文件"]);
+          const choice = await ctx.ui.select(lines.join("\n"), [...menuOperations.keys()]);
           context.assertCurrent();
           if (choice === "诊断") { operationName = operationNames.doctor; await doctor(); return; }
-          const operations: Record<string, string> = { "列出文件": "list", "刷新": "reload", "状态": "status", "开启": "on", "关闭": "off", "编辑文件": "edit", "删除文件": "delete" };
-          if (!choice || !operations[choice]) return;
-          operation = operations[choice];
+          operation = choice ? menuOperations.get(choice) : undefined;
+          if (!operation) return;
           operationName = operationNames[operation] ?? "";
         }
         const store = await runtime.getStore(ctx).catch((error: unknown) => {
@@ -131,16 +136,24 @@ export function registerCommands(pi: ExtensionAPI, runtime: MemoryRuntime, optio
           else { runtime.activity?.reset(reason); runtime.reset(); }
         };
         const effectiveState = async () => {
-          const state = await store.config.read();
-          if (store.child) return { state, text: "不可用（runner 子会话不受支持）", usable: false };
-          if (state.status === "unknown") return { state, text: `暂停（${faultSummary(new Error(state.fault))}）`, usable: false };
-          return { state, text: state.enabled ? "开启" : "关闭", usable: state.enabled };
+          const effective = await store.effectiveState();
+          if (store.child) return { effective, text: "不可用（runner 子会话不受支持）", usable: false };
+          if (effective.status === "unknown") return { effective, text: `暂停（${faultSummary(new Error(effective.fault))}）`, usable: false };
+          return { effective, text: effective.effectiveEnabled ? "开启" : "关闭", usable: effective.effectiveEnabled };
+        };
+        const stateLines = (effective: Awaited<ReturnType<typeof store.effectiveState>>) => {
+          if (effective.status === "unknown") return ["全局开关：不可读取（配置状态未知）。", "项目设置：未检查。", "有效状态：暂停。"];
+          return [
+            `全局开关：${effective.globalEnabled ? "开启" : "关闭"}。`,
+            `项目设置：${effective.projectPolicy === "disabled" ? "仅此项目禁用" : "继承全局"}。`,
+            `有效状态：${effective.effectiveEnabled ? "开启" : "关闭"}${effective.reason === "project-disabled" ? "（当前项目禁用）" : effective.reason === "global-off" ? "（全局关闭）" : ""}。`,
+          ];
         };
         const status = async () => {
-          const { state, text: effective, usable } = await effectiveState();
+          const { effective, text: effectiveText, usable } = await effectiveState();
           const lifecycle = options.lifecycleState?.();
           const observed = runtime.activity?.snapshot();
-          const lines = [`记忆：${effective}`, `项目目录：${ctx.cwd}`];
+          const lines = [`记忆：${effectiveText}`, `项目目录：${ctx.cwd}`, ...stateLines(effective)];
           lines.push(store.projectLocationTrusted
             ? `项目记忆：${store.paths.projectDir}`
             : "项目记忆：不可用（项目身份未建立；不展示替代路径，请修复仓库或 Git 配置后重试）。");
@@ -151,7 +164,11 @@ export function registerCommands(pi: ExtensionAPI, runtime: MemoryRuntime, optio
             lines.push(`索引快照：${lifecycle?.loaded ? "已加载" : "尚未加载"}${lifecycle?.fault ? `；原因：${faultSummary(new Error(lifecycle.fault))}` : ""}。`);
           }
           lines.push(manualNote);
-          if (state.status === "known" && !state.enabled) lines.push("记忆已关闭：文件和历史保留，新的受管理正文访问与保存会被拒绝。");
+          if (effective.status === "known" && !effective.effectiveEnabled) {
+            lines.push(effective.reason === "project-disabled"
+              ? "当前项目已禁用：文件和历史保留；list 仅显示文件名，edit、check 与 review 不读取正文；delete 仍可确认执行。"
+              : "记忆已关闭：文件和历史保留，新的受管理正文访问与保存会被拒绝。");
+          }
           const text = lines.join("\n");
           report(text);
           return text;
@@ -162,16 +179,51 @@ export function registerCommands(pi: ExtensionAPI, runtime: MemoryRuntime, optio
           await store.config.setEnabled(enabled);
           reset("toggle");
           report(enabled
-            ? `记忆已开启；快照将在下一条用户任务时加载。${scope(store.config.agentDir)}历史上下文不会被清除。`
-            : `记忆已关闭；同一 agentDir 下所有项目停止新的记忆使用，文件和历史保留。${scope(store.config.agentDir)}历史上下文不会被清除。`);
+            ? `全局记忆已开启；快照将在下一条用户任务时加载。当前项目仍可能被单独禁用，请用 /memory project status 检查。${scope(store.config.agentDir)}历史上下文不会被清除。`
+            : `全局记忆已关闭；同一 agentDir 下所有项目停止新的记忆使用，文件和历史保留。${scope(store.config.agentDir)}历史上下文不会被清除。`);
+        };
+        const project = async (action: string | undefined) => {
+          ensureSupported();
+          if (!store.projectLocationTrusted) {
+            throw new CommandError("项目设置不可用：项目身份未建立；请修复仓库或 Git 配置后重试，不会写入替代身份。");
+          }
+          if (action !== undefined && !["status", "off", "inherit"].includes(action)) {
+            throw new CommandError("用法：/memory project status | off | inherit。");
+          }
+          const current = async () => {
+            const effective = await store.effectiveState();
+            if (effective.status === "unknown") throw new Error(effective.fault);
+            return effective;
+          };
+          if (action === undefined || action === "status") {
+            const effective = await current();
+            report(["记忆项目设置", ...stateLines(effective), scope(store.config.agentDir),
+              "project off 仅禁用当前项目身份及其 worktree；project inherit 恢复继承全局开关，不会绕过全局关闭。"].join("\n"));
+            return;
+          }
+          const disabled = action === "off";
+          await store.config.setProjectDisabled(store.paths.projectId, disabled);
+          reset("toggle");
+          const effective = await current();
+          report([
+            disabled ? "当前项目已禁用；同一项目身份及其 worktree 停止新的记忆使用，其他项目与全局设置不变。" : "当前项目已恢复继承全局开关。",
+            ...stateLines(effective),
+            effective.effectiveEnabled
+              ? "快照将在下一条用户任务时加载。"
+              : "当前有效状态仍为关闭；记忆不会加载，文件和历史保留。",
+          ].join("\n"));
         };
         const reload = async () => {
           ensureSupported();
           const reloadStore = store.fork();
-          const state = await store.config.read();
+          const effective = await store.effectiveState();
           reloadStore.assertLifecycle();
-          if (state.status === "unknown") throw new Error(state.fault);
-          if (!state.enabled) throw new Error("Memory is off; turn it on with /memory on before reloading.");
+          if (effective.status === "unknown") throw new Error(effective.fault);
+          if (!effective.effectiveEnabled) {
+            throw new Error(effective.reason === "project-disabled"
+              ? "Memory is off for this project; restore inheritance with /memory project inherit before reloading."
+              : "Memory is off; turn it on with /memory on before reloading.");
+          }
           await reloadStore.access(store.paths.projectDir);
           if (await runtime.getStore(ctx) !== store) throw new CommandError("会话已变化，刷新已失效；请在当前会话重试。");
           reloadStore.assertLifecycle();
@@ -206,6 +258,79 @@ export function registerCommands(pi: ExtensionAPI, runtime: MemoryRuntime, optio
             await rm(temporary, { recursive: true, force: true }).catch(() => report("记忆临时文件清理失败；已报告的提交结果仍然有效。", "warning"));
           }
         };
+        const check = async (name?: string) => {
+          ensureSupported();
+          const checker = store.fork();
+          const path = name === undefined ? undefined : await relativeTarget(store, name);
+          const result = await checkIndex(checker, path === undefined ? undefined : relative(store.paths.projectDir, path).split(sep).join("/"));
+          if (await runtime.getStore(ctx) !== store) throw new CommandError("会话已变化，关联检查已失效；请重新执行。");
+          checker.assertLifecycle();
+          const text = formatCheck(result);
+          report(text, result.complete ? "info" : "warning");
+        };
+        const review = async (name?: string) => {
+          ensureSupported();
+          if (!ctx.hasUI) throw new CommandError("记忆审阅需要交互式查看与动作选择；用法：/memory review <项目内相对主题文件>。可用只读入口：/memory list、/memory check <主题>。");
+          const requireEnabled = async (viewer: MemoryStore) => {
+            const effective = await viewer.effectiveState();
+            viewer.assertLifecycle();
+            if (effective.status === "unknown") throw new Error(effective.fault);
+            if (!effective.effectiveEnabled) {
+              throw new CommandError(effective.reason === "project-disabled"
+                ? "当前项目已禁用，审阅已停止；执行 /memory project inherit 后重试。文件未更改。"
+                : "记忆已关闭，审阅已停止；执行 /memory on 后重试。文件未更改。");
+            }
+          };
+          let pending = name;
+          for (;;) {
+            if (pending === undefined) {
+              const names = (await fileNames(store)).filter((file) => file !== "MEMORY.md" && file.endsWith(".md"));
+              if (!names.length) { report("记忆：没有可审阅的主题文件。"); return; }
+              const selected = await ctx.ui.select("记忆审阅：选择一个主题", names);
+              if (selected === undefined) return;
+              pending = selected;
+            }
+            const current = await runtime.getStore(ctx);
+            if (current !== store) throw new CommandError("会话已变化，审阅已失效；请重新开始。");
+            const path = await relativeTarget(store, pending);
+            const relativePath = relative(store.paths.projectDir, path).split(sep).join("/");
+            const viewer = store.fork("user");
+            await requireEnabled(viewer);
+            const shown = await reviewTopic(viewer, relativePath).catch((error: unknown) => {
+              if (error instanceof Error && error.message.startsWith("Memory operation invalidated")) {
+                throw new CommandError("会话已变化，审阅已失效；请重新开始。");
+              }
+              if (error instanceof Error && error.message.startsWith("Memory is off")) {
+                throw new CommandError("记忆已关闭或当前项目已禁用，审阅已停止；文件未更改。");
+              }
+              throw error;
+            });
+            viewer.assertLifecycle();
+            await requireEnabled(viewer);
+            let edited: string | undefined;
+            try {
+              edited = await ctx.ui.editor(`记忆审阅：${relativePath} — 前 200 行 / 25KiB${shown.truncated ? "（已截断）" : ""}`, shown.content);
+            } catch (error) {
+              if (error instanceof Error && error.message.startsWith("Memory operation invalidated")) {
+                throw new CommandError("会话已变化，审阅已失效；请重新开始。");
+              }
+              throw error;
+            }
+            if (await runtime.getStore(ctx) !== store) throw new CommandError("会话已变化，审阅已失效；请重新开始。");
+            const afterEditor = store.fork("user");
+            await requireEnabled(afterEditor);
+            report(formatReview(shown));
+            if (edited === undefined) { report("已取消审阅；文件未更改。"); return; }
+            const choice = await ctx.ui.select(`记忆审阅：${relativePath}`, ["保留", "编辑", "删除", "返回列表"]);
+            if (choice === undefined) { report("已取消审阅；文件未更改。"); return; }
+            const beforeAction = store.fork("user");
+            await requireEnabled(beforeAction);
+            if (choice === "保留") { report("已保留该主题；未写入 reviewed 标记。"); return; }
+            if (choice === "编辑") { await edit(relativePath); return; }
+            if (choice === "删除") { await remove(relativePath); return; }
+            pending = undefined;
+          }
+        };
         const remove = async (name?: string) => {
           ensureSupported();
           if (!ctx.hasUI) throw new CommandError("记忆删除需要显式确认界面；未删除文件，也不提供 force 选项。");
@@ -222,11 +347,11 @@ export function registerCommands(pi: ExtensionAPI, runtime: MemoryRuntime, optio
           const validate = async () => {
             try {
               browserStore.assertLifecycle();
-              const state = await store.config.read();
-              if (state.status === "unknown") throw new Error(state.fault);
+              const effective = await store.effectiveState();
+              if (effective.status === "unknown") throw new Error(effective.fault);
               if (await runtime.getStore(ctx) !== store) throw new CommandError("会话已变化，文件浏览已失效；请重新打开列表。");
               browserStore.assertLifecycle();
-              return state.enabled;
+              return { enabled: effective.effectiveEnabled, reason: effective.reason };
             } catch (error) {
               if (error instanceof Error && error.message.startsWith("Memory operation invalidated")) {
                 throw new CommandError("会话变化，文件浏览已失效；请重新打开列表。");
@@ -236,18 +361,21 @@ export function registerCommands(pi: ExtensionAPI, runtime: MemoryRuntime, optio
           };
           for (;;) {
             await validate();
-            const names = await fileNames(store, validate);
-            const enabled = await validate();
+            const names = await fileNames(store, async () => { await validate(); });
+            const state = await validate();
             if (!names.length) report("记忆：没有可选择的项目文件。");
-            if (!enabled || !ctx.hasUI) {
+            if (!state.enabled || !ctx.hasUI) {
               if (names.length) report(`记忆文件：\n${names.join("\n")}`);
-              if (!enabled) report("记忆已关闭；执行 /memory on 后可查看文件内容。");
+              if (!state.enabled) report(state.reason === "project-disabled" ? "当前项目已禁用；/memory project inherit 后可查看文件内容。" : "记忆已关闭；执行 /memory on 后可查看文件内容。");
               return;
             }
             if (!names.length) return;
             const selected = await ctx.ui.select("记忆列表：选择一个文件查看", names);
             if (selected === undefined) return;
-            if (!await validate()) throw new Error("Memory is off; turn it on with /memory on to view file contents.");
+            const afterSelect = await validate();
+            if (!afterSelect.enabled) throw new Error(afterSelect.reason === "project-disabled"
+              ? "Memory is off for this project; restore inheritance with /memory project inherit to view file contents."
+              : "Memory is off; turn it on with /memory on to view file contents.");
             if (!names.includes(selected)) throw new CommandError("记忆文件已不可用；请重新打开列表。");
             const path = await relativeTarget(store, selected);
             let content: string;
@@ -256,7 +384,10 @@ export function registerCommands(pi: ExtensionAPI, runtime: MemoryRuntime, optio
               if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new CommandError("记忆文件已消失，无法查看；请重新打开列表。");
               throw error;
             }
-            if (!await validate()) throw new Error("Memory is off; turn it on with /memory on to view file contents.");
+            const afterRead = await validate();
+            if (!afterRead.enabled) throw new Error(afterRead.reason === "project-disabled"
+              ? "Memory is off for this project; restore inheritance with /memory project inherit to view file contents."
+              : "Memory is off; turn it on with /memory on to view file contents.");
             await browserStore.access(path);
             browserStore.assertLifecycle();
             const prefix = indexPrefix(content);
@@ -271,18 +402,36 @@ export function registerCommands(pi: ExtensionAPI, runtime: MemoryRuntime, optio
         if (operation === "reload" && !target) { await reload(); return; }
         if (operation === "edit") { await edit(target); return; }
         if (operation === "delete") { await remove(target); return; }
+        if (operation === "check") { await check(target); return; }
+        if (operation === "review") { await review(target); return; }
+        if (operation === "project") { await project(target); return; }
         if (operation) { report(usage, "warning"); return; }
         if (!ctx.hasUI || ctx.mode !== "tui") { await status(); report(usage); return; }
         const current = await status();
-        const choice = await ctx.ui.select(current, ["列出文件", "刷新", "状态", "诊断", "开启", "关闭", "编辑文件", "删除文件"]);
-        if (choice === "列出文件") { operationName = operationNames.list; await list(); }
-        else if (choice === "刷新") { operationName = operationNames.reload; await reload(); }
-        else if (choice === "状态") { operationName = operationNames.status; await status(); }
-        else if (choice === "诊断") { operationName = operationNames.doctor; await doctor(); }
-        else if (choice === "开启") { operationName = operationNames.on; await toggle(true); }
-        else if (choice === "关闭") { operationName = operationNames.off; await toggle(false); }
-        else if (choice === "编辑文件") { operationName = operationNames.edit; await edit(); }
-        else if (choice === "删除文件") { operationName = operationNames.delete; await remove(); }
+        const choice = await ctx.ui.select(current, [...menuOperations.keys()]);
+        const selected = choice ? menuOperations.get(choice) : undefined;
+        if (!selected) return;
+        operationName = operationNames[selected];
+        const actions: Record<string, () => Promise<unknown>> = {
+          list, reload, status, doctor, on: () => toggle(true), off: () => toggle(false),
+          project: async () => {
+            const choice = await ctx.ui.select("项目设置：选择操作", ["查看项目设置", "仅禁用当前项目", "恢复继承全局开关"]);
+            const mapped: Record<string, string> = { "查看项目设置": "status", "仅禁用当前项目": "off", "恢复继承全局开关": "inherit" };
+            const action = choice ? mapped[choice] : undefined;
+            if (action) await project(action);
+          },
+          check: async () => {
+            if (!ctx.hasUI) throw new CommandError("关联检查需要相对主题文件名；用法：/memory check <项目内相对主题文件>。");
+            const names = (await fileNames(store)).filter((name) => name !== "MEMORY.md" && name.endsWith(".md"));
+            if (!names.length) { report("记忆：没有可检查的主题文件。"); return; }
+            const selected = await ctx.ui.select("关联检查：选择一个主题", names);
+            if (selected === undefined) return;
+            await check(selected);
+          },
+          review,
+          edit, delete: remove,
+        };
+        await actions[selected]();
       } catch (error) {
         report(error instanceof CommandError ? error.message : userError(error, operationName || undefined), "error");
       }

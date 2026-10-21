@@ -146,6 +146,60 @@ test("external dangling file aliases cannot bypass memory validation or the off 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("a project-disable setting blocks managed body access and saves while ordinary files stay delegated", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-wrapper-project-off-"));
+  try {
+    const store = await makeStore(join(root, "agent"));
+    const target = join(store.paths.projectDir, "topic.md");
+    await store.write(target, "original");
+    await store.config.setProjectDisabled(store.paths.projectId, true);
+    const state = await store.effectiveState();
+    assert.equal(state.status, "known");
+    assert.equal(state.effectiveEnabled, false);
+    assert.equal(state.status === "known" && state.projectPolicy, "disabled");
+    const tools = managedFileTools(root, store);
+    const ctx = { cwd: root } as ExtensionToolContext;
+    await assert.rejects(store.access(target), /Memory is off/);
+    await assert.rejects(store.write(target, "blocked"), /Memory is off/);
+    await assert.rejects(tools.read.execute("r", { path: target }, undefined, undefined, ctx), /Memory is off/);
+    await assert.rejects(tools.write.execute("w", { path: target, content: "blocked" }, undefined, undefined, ctx), /Memory is off/);
+    assert.equal(await readFile(target, "utf8"), "original");
+    await writeFile(join(root, "ordinary.txt"), "ordinary");
+    const ordinary = await tools.read.execute("r", { path: "ordinary.txt" }, undefined, undefined, ctx);
+    assert.match((ordinary.content[0] as { text: string }).text, /ordinary/);
+    await store.config.setProjectDisabled(store.paths.projectId, false);
+    await store.config.setEnabled(false);
+    await assert.rejects(store.access(target), /Memory is off/);
+    await store.config.setEnabled(true);
+    assert.equal((await store.effectiveState()).effectiveEnabled, true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("project-disable rejects reads that complete after the setting changes", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-project-off-read-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = await makeStore(join(root, "agent"));
+  const path = join(store.paths.projectDir, "topic.md");
+  await store.write(path, "synthetic private body");
+  const readBuffer = store.readBuffer.bind(store);
+  let disabled = false;
+  t.mock.method(store, "readBuffer", async (...args: Parameters<typeof readBuffer>) => {
+    const result = await readBuffer(...args);
+    if (!disabled) {
+      disabled = true;
+      await store.config.setProjectDisabled(store.paths.projectId, true);
+    }
+    return result;
+  });
+  const tools = managedFileTools(root, store);
+  const ctx = { cwd: root } as ExtensionToolContext;
+  await assert.rejects(tools.read.execute("read", { path }, undefined, undefined, ctx), /Memory is off/);
+  assert.equal(await store.config.read().then((state) => state.status === "known" && state.enabled), true);
+  await store.config.setProjectDisabled(store.paths.projectId, false);
+  const allowed = await tools.read.execute("read", { path }, undefined, undefined, ctx);
+  assert.match((allowed.content[0] as { text: string }).text, /synthetic private body/);
+});
+
 test("ordinary dangling file aliases still delegate default host writing with unchanged results", async () => {
   const root = await mkdtemp(join(tmpdir(), "auto-memory-wrapper-ordinary-alias-"));
   try {
@@ -250,10 +304,13 @@ test("a closed store during the index step leaves the saved topic and never clai
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("cancellation after atomic replacement reports saved rather than suggesting rollback", async () => {
-  const root = await mkdtemp(join(tmpdir(), "auto-memory-wrapper-cancel-"));
-  try {
+test("cancellation after atomic replacement reports saved rather than suggesting rollback", async (t) => {
+  for (const operation of ["write", "edit"] as const) await t.test(operation, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "auto-memory-wrapper-cancel-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
     const store = await makeStore(join(root, "agent"));
+    const path = join(store.paths.projectDir, "saved.md");
+    if (operation === "edit") await store.write(path, "original");
     const abort = new AbortController();
     const mutate = store.mutate.bind(store);
     store.mutate = async function<T>(path: string, action: (file: LockedFile) => Promise<T>, hooks: AtomicHooks = {}): Promise<T> {
@@ -265,12 +322,14 @@ test("cancellation after atomic replacement reports saved rather than suggesting
     };
     const tools = managedFileTools(root, store);
     const ctx = { cwd: root } as ExtensionToolContext;
-    const path = join(store.paths.projectDir, "saved.md");
-    const result = await tools.write.execute("cancelled", { path, content: "committed" }, abort.signal, undefined, ctx);
+    const result = operation === "write"
+      ? await tools.write.execute("cancelled", { path, content: "committed" }, abort.signal, undefined, ctx)
+      : await tools.edit.execute("cancelled", { path, edits: [{ oldText: "original", newText: "committed" }] }, abort.signal, undefined, ctx);
     assert.equal(result.isError, true);
-    assert.match(JSON.stringify(result.content), /file IS SAVED/);
+    assert.deepEqual(result.content, [{ type: "text", text: "Saved successfully. 主题已保存；本次保存未核实 MEMORY.md 关联。请检查已有入口，仅在缺失或过时时更新；主题仍由模型按需读取，保存不代表已注入或必然遵循。 The file IS SAVED, but the host operation did not finish normally; reread before retrying." }]);
+    assert.equal(result.details, undefined);
     assert.equal(await readFile(path, "utf8"), "committed");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  });
 });
 
 test("wrapper instances share no accidental read baseline, and register as same-named public definitions", async () => {

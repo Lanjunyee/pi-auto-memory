@@ -14,3 +14,18 @@ for (const script of ['scripts/test-package.mjs', 'scripts/check-snapshot.mjs'])
     }
   });
 }
+
+test('host regression is opt-in, rejects unknown options early and never edits the working tree lock', async () => {
+  const error = await exec(process.execPath, ['scripts/test-package.mjs', '--host-regression', '--unknown'], { encoding: 'utf8', timeout: 10000 }).catch(error => error);
+  assert.ok(error instanceof Error);
+  assert.match(String(error.stderr), /Usage:/);
+  const text = await import('node:fs/promises').then(fs => fs.readFile('scripts/test-package.mjs', 'utf8'));
+  assert.match(text, /--host-regression/);
+  assert.match(text, /runHostRegression/);
+  const regression = await import('node:fs/promises').then(fs => fs.readFile('scripts/host-regression.mjs', 'utf8'));
+  for (const phrase of ['load.test.ts', 'host-contract.test.ts', 'registration.test.ts', 'lifecycle.test.ts', 'lifecycle-owner.test.ts',
+    'Resolver mixed versions', 'Resolver fell back to a development tree', 'Copied test/source file differs', 'pi-agent-core', 'pi-ai']) {
+    assert.ok(regression.includes(phrase), phrase);
+  }
+  assert.doesNotMatch(regression, /npm install|package-lock\.json|package\.json.*write/);
+});

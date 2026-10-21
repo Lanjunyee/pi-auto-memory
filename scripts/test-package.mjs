@@ -4,13 +4,18 @@ import { mkdtemp, mkdir, readFile, writeFile, cp, rm, rename, realpath } from 'n
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { pack, policy, readArchive, prepareSnapshot } from './distribution.mjs';
+import { runHostRegression } from './host-regression.mjs';
 
 const source = resolve('.');
 const HOST_VERSIONS = ['1.2.0', '1.3.0'];
 const args = process.argv.slice(2);
 let hostVersion = '1.2.0';
+let hostRegression = false;
+let tui = false;
 for (let index = 0; index < args.length; index += 1) {
-  if (args[index] !== '--host-version' || index + 1 >= args.length) throw new Error('Usage: node scripts/test-package.mjs [--host-version 1.2.0|1.3.0]');
+  if (args[index] === '--host-regression') { hostRegression = true; continue; }
+  if (args[index] === '--tui') { tui = true; continue; }
+  if (args[index] !== '--host-version' || index + 1 >= args.length) throw new Error('Usage: node scripts/test-package.mjs [--host-version 1.2.0|1.3.0] [--host-regression] [--tui]');
   hostVersion = args[index + 1];
   index += 1;
 }
@@ -106,8 +111,24 @@ await pi(git, ['install', gitSpec]);
 await check(git);
 await pi(git, ['remove', gitSpec]);
 await check(git, 'removed');
+const regression = hostRegression ? await runHostRegression({ source, host, hostVersion }) : undefined;
+let terminal;
+if (tui) {
+  const output = await run('python3', [join(source, 'scripts/check-tui-editor.py'), '--host-root', host,
+    '--extension', join(unpacked, 'src/index.ts')], source);
+  const lines = output.trim().split('\n');
+  const start = lines.findIndex((line) => line === '{');
+  assert.ok(start >= 0, `TUI validation did not emit a JSON result: ${output.slice(-2000)}`);
+  terminal = JSON.parse(lines.slice(start).join('\n'));
+  assert.equal(terminal.result, 'pass', 'Chinese TUI PTY validation must pass');
+  assert.equal(await realpath(terminal.extension), await realpath(join(unpacked, 'src/index.ts')),
+    'TUI validation must load the unpacked candidate entry, not the development tree');
+  console.log(JSON.stringify({ tui: terminal }));
+}
 console.log(JSON.stringify({ result: 'pass', host: hostManifest.version, requestedHost: hostVersion, artifactSha256: artifact.sha256,
   cases: ['tarball production-only load', 'local package install/remove', 'missing source rejected', 'missing dependencies rejected', 'candidate tarball npm hoisted layout install/remove with byte comparison', 'Git package install dependencies/remove'],
+  ...(regression ? { hostRegression: regression } : {}),
+  ...(terminal ? { terminal } : {}),
   modelCalls: 0, cleanup: 'temporary resources removed on exit' }, null, 2));
 } finally {
   await rm(root, { recursive: true, force: true });

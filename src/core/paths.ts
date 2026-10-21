@@ -68,7 +68,7 @@ async function rejectLinks(root: string, path: string): Promise<void> {
 export class MemoryPaths {
   readonly memoryRoot: string;
   readonly projectDir: string;
-  private constructor(readonly agentDir: string, readonly lexicalRoot: string, projectId: string) {
+  private constructor(readonly agentDir: string, readonly lexicalRoot: string, readonly projectId: string) {
     this.memoryRoot = join(agentDir, "memory");
     this.projectDir = join(this.memoryRoot, projectId);
   }

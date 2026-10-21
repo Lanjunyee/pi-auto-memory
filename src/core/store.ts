@@ -3,7 +3,7 @@ import { lstat, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { atomicReplace, type AtomicHooks } from "./atomic-file.js";
-import { MemoryConfig, type ConfigState } from "./config.js";
+import { MemoryConfig, resolveEffectiveState, type ConfigState, type EffectiveState } from "./config.js";
 import { prepareContent, savedResult } from "./content-policy.js";
 import { withLock } from "./locks.js";
 import { MemoryPaths } from "./paths.js";
@@ -69,7 +69,12 @@ export class MemoryStore {
     if (this.child) throw new Error("Memory unavailable: runner child is unsupported.");
     this.assertLifecycle(generation);
     if (state.status === "unknown") throw new Error(state.fault);
-    if (!state.enabled) throw new Error("Memory is off; managed body access and saves are rejected.");
+    if (!resolveEffectiveState(state, this.paths.projectId).effectiveEnabled) {
+      throw new Error("Memory is off; managed body access and saves are rejected.");
+    }
+  }
+  async effectiveState(): Promise<EffectiveState> {
+    return resolveEffectiveState(await this.config.read(), this.paths.projectId);
   }
   async access(path: string): Promise<string> {
     const generation = this.generation;
@@ -91,7 +96,7 @@ export class MemoryStore {
     this.checkState(await this.config.read(), generation);
     return { path: target, buffer, generation };
   }
-  recordRange(path: string, buffer: Buffer, start: number, end: number, generation = this.generation): void {
+  recordRange(path: string, buffer: Buffer, start: number, end: number, generation = this.generation): string | undefined {
     if (this.retired || generation !== this.generation || this.lifecycleOwner?.retired) return;
     if (start < 0 || end < start || end > buffer.length) throw new Error("Invalid memory read coverage.");
     const hash = digest(buffer);
@@ -106,6 +111,7 @@ export class MemoryStore {
     }
     version.ranges = merged;
     this.versions.set(path, version);
+    return hash;
   }
   async readFull(path: string): Promise<string> {
     const result = await this.readBuffer(path);

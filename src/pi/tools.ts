@@ -46,6 +46,11 @@ function savedToolResult<T>(result: AgentToolResult<T>, saved: Save, path: strin
   };
 }
 
+function failedAfterSave(saved: Save | undefined, path: string, error: unknown): AgentToolResult<undefined> {
+  if (!saved) throw managedError(error);
+  return { content: [{ type: "text", text: `${saved.note} ${saveTiming(path)} The file IS SAVED, but the host operation did not finish normally; reread before retrying.` }], details: undefined, isError: true };
+}
+
 export function managedFileTools(cwd: string, provider: StoreProvider, options: { autoResizeImages?: boolean; agentDir?: string } = {}) {
   const host = standardFileTools(cwd, { autoResizeImages: options.autoResizeImages });
   const obtain = (ctx: ExtensionToolContext) => typeof provider === "function" ? provider(ctx) : Promise.resolve(provider);
@@ -89,10 +94,11 @@ export function managedFileTools(cwd: string, provider: StoreProvider, options: 
         const result = await factory.execute(id, params, signal, update, ctx);
         if (observed) {
           store.assertLifecycle(observed.generation);
+          await store.access(observed.path);
           const [start, end] = returnedReadRange(observed.buffer, params, result);
-          store.recordRange(observed.path, observed.buffer, start, end, observed.generation);
+          const hash = store.recordRange(observed.path, observed.buffer, start, end, observed.generation);
           if (!result.isError && end > start) observe({ kind: "read", path: observed.path,
-            digest: digest(observed.buffer), length: observed.buffer.length, start, end });
+            digest: hash ?? digest(observed.buffer), length: observed.buffer.length, start, end });
         }
         return result;
       } catch (error) { throw managedError(error); }
@@ -121,10 +127,7 @@ export function managedFileTools(cwd: string, provider: StoreProvider, options: 
         });
         if (!saved) throw new Error("Memory factory did not commit a file.");
         return savedToolResult(result, saved, target.path);
-      } catch (error) {
-        if (saved) return { content: [{ type: "text", text: `${saved.note} ${saveTiming(target.path)} The file IS SAVED, but the host operation did not finish normally; reread before retrying.` }], details: undefined, isError: true };
-        throw managedError(error);
-      }
+      } catch (error) { return failedAfterSave(saved, target.path, error); }
     },
   };
 
@@ -151,10 +154,7 @@ export function managedFileTools(cwd: string, provider: StoreProvider, options: 
         });
         if (!saved) throw new Error("Memory factory did not commit a file.");
         return savedToolResult(result, saved, target.path);
-      } catch (error) {
-        if (saved) return { content: [{ type: "text", text: `${saved.note} ${saveTiming(target.path)} The file IS SAVED, but the host operation did not finish normally; reread before retrying.` }], details: undefined, isError: true };
-        throw managedError(error);
-      }
+      } catch (error) { return failedAfterSave(saved, target.path, error); }
     },
   };
   return { read, write, edit };

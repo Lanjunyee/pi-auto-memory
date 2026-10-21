@@ -2,6 +2,7 @@ import { lstat, readdir } from "node:fs/promises";
 import { basename, join, sep } from "node:path";
 import { createLsToolDefinition, type ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { contains } from "../core/paths.js";
+import { resolveEffectiveState } from "../core/config.js";
 import type { MemoryStore } from "../core/store.js";
 
 export function checkScanAbort(signal?: AbortSignal): void {
@@ -25,6 +26,7 @@ export interface ScanPolicy {
   overlapping: boolean;
   empty: boolean;
   excluded: string[];
+  memoryVisible: boolean;
 }
 
 export async function scanPolicy(store: MemoryStore, requested: string, cwd: string, signal?: AbortSignal): Promise<ScanPolicy> {
@@ -34,20 +36,22 @@ export async function scanPolicy(store: MemoryStore, requested: string, cwd: str
   const memory = store.paths.memoryRoot;
   const ancestor = contains(root, memory);
   const overlapping = target.kind === "memory" || ancestor;
-  const policy: ScanPolicy = { root, overlapping, empty: false, excluded: [] };
+  const policy: ScanPolicy = { root, overlapping, empty: false, excluded: [], memoryVisible: false };
   if (!overlapping) return policy;
   store.assertLifecycle();
   if (target.kind === "memory" && root !== memory) {
     await store.access(root);
+    policy.memoryVisible = true;
     return policy;
   }
-  const state = await store.config.read();
-  const enabled = !store.child && state.status !== "unknown" && state.enabled;
+  const state = resolveEffectiveState(await store.config.read(), store.paths.projectId);
+  const enabled = !store.child && state.status !== "unknown" && state.effectiveEnabled;
   if (!enabled) {
     if (root === memory) policy.empty = true;
     else policy.excluded.push(memory);
     return policy;
   }
+  policy.memoryVisible = true;
   let entries;
   try {
     if ((await lstat(memory)).isSymbolicLink()) {
@@ -62,6 +66,11 @@ export async function scanPolicy(store: MemoryStore, requested: string, cwd: str
   const current = basename(store.paths.projectDir);
   for (const entry of entries) {
     if (entry.name !== current || entry.isSymbolicLink()) policy.excluded.push(join(memory, entry.name));
+  }
+  const after = resolveEffectiveState(await store.config.read(), store.paths.projectId);
+  store.assertLifecycle();
+  if (!store.child && (after.status === "unknown" || !after.effectiveEnabled)) {
+    throw new Error("Memory scan invalidated by a settings change; retry.");
   }
   checkScanAbort(signal);
   return policy;

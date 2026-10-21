@@ -148,11 +148,21 @@ pi remove git:github.com/Lanjunyee/pi-auto-memory
 | `/memory status` | 状态、项目路径、快照边界及会话摘要；不读正文 | 排查是否开启、准备或投影 |
 | `/memory reload` | 撤销快照和旧操作，下一用户任务重载 | 修改索引后安排刷新 |
 | `/memory doctor` | 只读分项诊断，不自动修复 | 检查配置、工具或兼容问题 |
-| `/memory on` / `/memory off` | 持久开启／关闭；关闭保留文件与历史 | 控制后续记忆使用 |
+| `/memory on` / `/memory off` | 持久开启／关闭全部项目；关闭保留文件与历史 | 控制后续记忆使用 |
+| `/memory project status` | 查看全局开关、当前项目设置及最终有效状态 | 确认当前项目为何启用或关闭 |
+| `/memory project off` / `inherit` | 仅禁用当前项目及 worktree／恢复继承全局开关 | 长期项目与临时项目使用不同策略 |
+| `/memory check [topic.md]` | 只读检查索引链接、断链、重复入口、加载范围及主题入口 | 确认已保存主题是否能被索引发现 |
+| `/memory review [topic.md]` | 有界查看选定主题、修改时间与索引入口，再选择保留、编辑或删除 | 长期维护已积累的记忆内容 |
 | `/memory edit topic.md` | 用 TUI/RPC 编辑器编辑当前项目相对文件 | 修正已保存的偏好 |
 | `/memory delete topic.md` | 确认后删除单个文件，关闭时也可用 | 删除过期记录；无撤销 |
 
-记忆文件按项目隔离；同一 agentDir 的项目共用持久开关。修改索引后，执行 `/memory reload`，刷新在下一用户任务生效。
+记忆文件按项目隔离；同一 agentDir 的项目共用全局开关。`/memory project off` 只影响当前项目身份及其 worktree，不能绕过全局关闭；`project inherit` 恢复继承后仍以全局开关为准。修改索引后，执行 `/memory reload`，刷新在下一用户任务生效。
+
+**索引关联检查**：`/memory check [topic.md]` 只读检查当前索引中受支持的单行 Markdown 本地链接：主题是否存在、是否有入口、断链、重复入口，以及前 200 行／25KiB UTF-8 加载范围。只有完整 Markdown 链接落入实际加载前缀才标为范围内；第 201 行、同一行中位于字节截断点之后或跨越截断点的链接标为范围外，同行重复入口按各自行列分别报告。该范围仅代表检查时点磁盘索引下次加载的候选范围；当前会话可能复用旧快照，不代表当前模型请求已经包含入口。需要时执行 `/memory reload`，下一用户任务才加载。链接检查上限为 1MiB、10,000 行、1,000 个链接；超出上限或含不支持的写法时报告检查不完整，不宣称“入口缺失”。它不读取主题正文、不修改文件、不建立模型读取许可；结构有效也不代表描述准确或模型必然召回。修正入口仍使用 `/memory edit MEMORY.md`。
+
+**主题审阅**：`/memory review [topic.md]` 只针对选定普通主题，有界展示前 200 行／25KiB、可安全解析的 `modified` 与索引入口，并明确截断和未检查范围。入口行列及加载范围与关联检查一致，描述检查时点的磁盘候选范围，不证明当前快照已包含该入口。保留与取消不写文件，也不写入 `reviewed` 标记；`modified` 只表示最后修改时间，不代表内容仍然有效。选择编辑或删除时重新完整读取当前版本并复用既有提交／确认链；人工合并需逐文件编辑，不自动合并、删除源主题或维护索引。
+
+**配置兼容**：只有首次显式修改项目设置时，`auto-memory.json` 才从 v1 升级为带 `disabledProjects` 的 v2；查询、诊断和加载不会自动迁移。v1 的全局 `enabled` 仍表示所有项目共用开关，`/memory on`／`off` 继续只改全局值。升级后，只支持 v1 的旧扩展会把配置视为不受支持并暂停，需要升级并完整重载扩展，不会静默忽略项目禁用。全局开关不清空项目设置，也不提供自动降级。项目禁用按项目身份记录，同一仓库 worktree 共享；本变更不提供导入、导出、仓库搬迁或跨 clone 迁移，现有“移动仓库不迁移旧记忆”的边界保持不变。
 
 ## 支持与安全边界
 
@@ -183,19 +193,25 @@ pi remove git:github.com/Lanjunyee/pi-auto-memory
 </details>
 
 <details>
-<summary><strong>共用开关、项目隔离与延迟感知</strong></summary>
+<summary><strong>全局开关、项目禁用与延迟感知</strong></summary>
 
-记忆文件按项目隔离，但持久开关共用：`/memory on` 与 `/memory off` 影响**同一 Pi 用户目录（agentDir）下的所有项目**，不宣称影响使用其他 agentDir 的实例。其他会话在**下一任务或下一次受管理访问检查**时感知变化，没有即时广播或后台 watcher。
+记忆文件按项目隔离。`/memory on` 与 `/memory off` 是**全局开关**，影响同一 Pi 用户目录（agentDir）下的所有项目；`/memory project off` 只禁用当前项目身份及其 worktree，`/memory project inherit` 移除该禁用项。全局关闭时，恢复项目继承不会开启记忆。其他会话在**下一任务或下一次受管理访问检查**时感知变化，没有即时广播或后台 watcher。
 
-独立配置为 `<agentDir>/auto-memory.json`，不修改 pi `settings.json`：
+独立配置为 `<agentDir>/auto-memory.json`，不修改 pi `settings.json`。旧格式只含全局开关：
 
 ```json
 { "version": 1, "enabled": false }
 ```
 
-缺失默认开启；损坏、未知版本或非 boolean 开关会暂停并提示修复。设置在配置锁内重读，保留额外字段，通过私有临时文件原子替换；失败不宣称成功。每次任务开始、受管理访问和最终提交都检查持久开关。成功关闭之后不再许可基于旧 enabled 检查的新提交；已先取得配置锁的提交会在 off 成功返回前完成。
+首次显式修改项目设置时原子升级为 v2，并保留原有字段：
 
-`/memory off` 只停止新的主动注入和受管理正文访问，**不清除文件或已有会话历史**；支持历史 system 更新的模型仍可能看到旧记录。删除也不是永久忘记。
+```json
+{ "version": 2, "enabled": true, "disabledProjects": ["git-<sha256>"] }
+```
+
+缺失默认开启且项目继承；损坏、非法项目身份、未知版本或非 boolean 开关会暂停并提示修复。查询、诊断和加载不会自动迁移；旧扩展读取 v2 会按未知版本暂停，不把它当作只有全局开关的 v1 继续开启。设置在配置锁内重读，保留额外字段，通过私有临时文件原子替换；失败不宣称成功。每次任务开始、受管理访问和最终提交都检查全局与项目有效状态。成功关闭之后不再许可基于旧状态检查的新提交；已先取得配置锁的提交会在关闭成功返回前完成。
+
+`/memory off` 与 `/memory project off` 只停止新的主动注入和受管理正文访问，**不清除文件或已有会话历史**；支持历史 system 更新的模型仍可能看到旧记录。删除也不是永久忘记。
 
 </details>
 
@@ -314,14 +330,18 @@ npm run typecheck
 npm test
 npm run check
 npm run test:package -- --host-version 1.3.0
+npm run test:package -- --host-version 1.3.0 --host-regression
+npm run test:package -- --host-version 1.3.0 --tui
 node scripts/check-snapshot.mjs --host-version 1.3.0
 ```
 
-包级命令接受 `--host-version 1.2.0|1.3.0`，默认 1.2.0；指定的宿主会被实际安装并核对，非法版本在下载前失败。
+包级命令接受 `--host-version 1.2.0|1.3.0`，默认 1.2.0；指定的宿主会被实际安装并核对，非法版本在下载前失败。`--host-regression` 为显式增量：复用同一次隔离宿主安装，在真实源码／测试副本中运行 `load`、`host-contract`、`registration`、`lifecycle`、`lifecycle-owner` 五个完整测试文件，并在测试前核对实际解析到的 `pi-coding-agent`、`pi-agent-core`、`pi-ai` 版本与路径，拒绝回退开发依赖或实例混用；不会修改工作树 `package.json` 或锁文件。宿主自身声明可能使相关包解析到不同补丁/次版本，结果记录实际版本而不假定全部相同。`--tui` 在隔离宿主上加载解包后的候选入口运行中文真实 PTY 验证：菜单取消、编辑器提交与取消、关联检查、项目设置、审阅取消、删除先拒绝再确认和 doctor，并用注入的网络守卫确认零外部请求，不提交模型任务、不配置认证。
+
+本地已执行 Pi 1.2.0 与 1.3.0 的包级验证及关键回归：Pi 1.3.0 的依赖闭包为 `pi-coding-agent`／`pi-agent-core`／`pi-ai` 1.3.0，五个文件 137 项测试全部通过；Pi 1.2.0 宿主实例解析的 core／ai 实际为 1.3.0，结果按实际版本记录，不宣称整组 1.2.0。两次均未读取认证或调用模型。中文 PTY 已在 macOS 的 Pi 1.3.0 隔离宿主、解包后的候选入口上实际通过（菜单取消、编辑器提交与取消、关联检查、项目设置、审阅取消、删除确认与 doctor），成功运行会删除自身沙箱；Linux、其他平台及 hosted CI 的实际结果仍需另行运行。开发树内的完整记录不随 npm 包或公开源码分发。
 
 测试只使用临时目录，不读用户凭据，不注册日常扩展，不调用模型。`tests/load.test.ts` 显式隔离加载；`tests/host-contract.test.ts` 比较标准工具 schema/行为，并验证命名 system section。离线测试不等于真实模型体验、中文界面验收或跨平台兼容证明。
 
-CI 配置覆盖 ubuntu-24.04／macos-15 × Node 22.19.0／26.9.0 × Pi 1.2.0／1.3.0 八个组合，先准备并确认 Git、rg、fd／fdfind，再执行锁文件安装、`npm run check`、带对应宿主参数的 `npm run test:package` 和 `node scripts/check-snapshot.mjs`。后者在逐文件公开副本上重新安装依赖并运行完整检查和包级验证。工作流契约由 `tests/workflow.test.mjs` 静态检查。公开提交 `2b3452fcfe6bdfb23791e80a50324f5ad7ad3d61` 的 hosted CI run `39045640235` 当时四格全部成功；该历史结果早于本矩阵扩展，不代表新增宿主组合已经运行，也不能替代当前开发树的验收。不等于当前开发树、真实模型效果、中文界面或 Linux 本地手工验收。工作流不发布、不写仓库、不请求秘密或调用模型。
+CI 配置覆盖 ubuntu-24.04／macos-15 × Node 22.19.0／26.9.0 × Pi 1.2.0／1.3.0 八个组合，先准备并确认 Git、rg、fd／fdfind，再执行锁文件安装、`npm run check`、带对应宿主参数的 `npm run test:package` 和 `node scripts/check-snapshot.mjs`。其中 Pi 1.3.0 × Node 22.19.0 的两个 OS 组合额外启用 `--host-regression --tui`；公开快照检查不再重复该增量。工作流契约由 `tests/workflow.test.mjs` 静态检查。公开提交 `2b3452fcfe6bdfb23791e80a50324f5ad7ad3d61` 的 hosted CI run `39045640235` 当时四格全部成功；该历史结果早于本矩阵扩展，不代表新增宿主组合已经运行，也不能替代当前开发树的验收。不等于当前开发树、真实模型效果、中文界面或 Linux 本地手工验收。工作流不发布、不写仓库、不请求秘密或调用模型。
 
 ## 许可与分发验证
 

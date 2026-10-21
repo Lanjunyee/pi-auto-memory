@@ -10,6 +10,13 @@ import type { MemoryStore } from "../core/store.js";
 import { checkScanAbort, escapeScanGlob, type ScanPolicy } from "./scan-policy.js";
 import { existingBinary } from "./scan-binary.js";
 
+async function assertScanEnabled(store: MemoryStore, policy: ScanPolicy): Promise<void> {
+  if (!policy.memoryVisible) return;
+  const state = await store.effectiveState();
+  if (state.status === "unknown") throw new Error(state.fault);
+  if (!state.effectiveEnabled) throw new Error("Memory scan invalidated by a settings change; retry.");
+}
+
 interface StreamResult { lines: string[]; code: number | null; stderr: string; limited: boolean }
 async function stream(binary: string, args: string[], signal: AbortSignal | undefined, onLine?: (line: string) => boolean): Promise<StreamResult> {
   checkScanAbort(signal);
@@ -67,6 +74,7 @@ export async function protectedGrep(store: MemoryStore, policy: ScanPolicy, para
     return count >= limit;
   });
   store.assertLifecycle();
+  await assertScanEnabled(store, policy);
   if (!result.limited && result.code !== 0 && result.code !== 1) throw new Error(result.stderr.trim() || `ripgrep exited with code ${result.code}`);
   if (!count) return { content: [{ type: "text", text: "No matches found" }], details: undefined };
   const context = params.context && params.context > 0 ? params.context : 0;
@@ -152,6 +160,7 @@ export async function protectedFind(store: MemoryStore, policy: ScanPolicy, para
   store.assertLifecycle();
   const result = await stream(binary, args, signal);
   store.assertLifecycle();
+  await assertScanEnabled(store, policy);
   if (result.code !== 0 && !result.lines.join("\n")) throw new Error(result.stderr.trim() || `fd exited with code ${result.code}`);
   if (!result.lines.join("\n")) return { content: [{ type: "text", text: "No files found matching pattern" }], details: undefined };
   const paths = result.lines.map((raw) => raw.replace(/\r$/, "").trim()).filter(Boolean).map((path) => {

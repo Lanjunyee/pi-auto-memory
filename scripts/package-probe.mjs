@@ -61,7 +61,81 @@ if (expected === 'broken') {
     await session.prompt('/memory on');
     const probeIndex = join(memoryDir, 'MEMORY.md');
     await mkdir(memoryDir, { recursive: true });
+    await writeFile(probeIndex, '# Memory\n\n- [probe](package-test.md): initial probe snapshot\n- [broken](missing-topic.md): broken entry\n- [probe again](package-test.md): duplicate entry\n');
+    const check = await commandText(session, '/memory check package-test.md');
+    assert.match(check, /记忆关联检查/);
+    assert.match(check, /缺失：missing-topic\.md/);
+    assert.match(check, /重复：package-test\.md/);
+    assert.match(check, /主题：package-test\.md；存在/);
+    const review = await commandText(session, '/memory review package-test.md');
+    assert.match(review, /记忆审阅需要交互式查看与动作选择/);
+    assert.equal(await readFile(path, 'utf8').then((text) => text.includes('synthetic package memory')), true);
+    const reviewBody = await readFile(path, 'utf8');
+    const notifications = [];
+    const reviewUi = {
+      select: async (title, options) => title.startsWith('记忆审阅：选择一个主题') ? 'package-test.md' : '保留',
+      editor: async (title, prefill) => { reviewUi.shown = { title, prefill }; return prefill; },
+      confirm: async () => false,
+      input: async () => undefined,
+      notify: (text) => notifications.push(text),
+      setStatus: () => {},
+      setWidget: () => {},
+      setFooter: () => {},
+      setHeader: () => {},
+      setTitle: () => {},
+      setWorkingVisible: () => {},
+      setWorkingMessage: () => {},
+      setWorkingIndicator: () => {},
+      setHiddenThinkingLabel: () => {},
+      pasteToEditor: () => {},
+      setEditorText: () => {},
+      getEditorText: () => '',
+      addAutocompleteProvider: () => {},
+      get theme() { return {}; },
+    };
+    await session.bindExtensions({ uiContext: reviewUi, mode: 'tui' });
+    session.extensionRunner.setUIContext?.(reviewUi, 'tui');
+    await session.prompt('/memory review package-test.md');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(reviewUi.shown, 'interactive review must display the selected topic');
+    assert.match(reviewUi.shown.prefill, /synthetic package memory/);
+    const reviewText = notifications.join('\n');
+    assert.match(reviewText, /记忆审阅/);
+    assert.match(reviewText, /修改时间/);
+    assert.match(reviewText, /已保留该主题/);
+    assert.equal(await readFile(path, 'utf8'), reviewBody, 'cancelling review must not change the topic');
+    for (const boundaryIndex of ['line\n'.repeat(200) + '[probe](package-test.md)', 'x'.repeat(25 * 1024) + ' [probe](package-test.md)']) {
+      await writeFile(probeIndex, boundaryIndex);
+      notifications.length = 0;
+      await session.prompt('/memory check package-test.md');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.match(notifications.join('\n'), /加载范围外|加载范围之外/);
+      assert.match(notifications.join('\n'), /磁盘/);
+      notifications.length = 0;
+      await session.prompt('/memory review package-test.md');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.match(notifications.join('\n'), /加载范围外/);
+      assert.equal(await readFile(probeIndex, 'utf8'), boundaryIndex);
+      assert.equal(await readFile(path, 'utf8'), reviewBody);
+    }
     await writeFile(probeIndex, '# Memory\n\n- [probe](package-test.md): initial probe snapshot\n');
+    await session.bindExtensions({ uiContext: null, mode: 'print' });
+    assert.equal(calls, 0);
+    const statusBeforeProject = await commandText(session, '/memory status');
+    assert.match(statusBeforeProject, /全局开关/);
+    assert.match(statusBeforeProject, /项目设置/);
+    await session.prompt('/memory project off');
+    await assert.rejects(call('read', { path }), /Memory is off/);
+    await assert.rejects(call('write', { path, content: 'must not save while disabled' }), /Memory is off/);
+    await call('write', { path: join(cwd, 'disabled-ordinary.txt'), content: 'still allowed' });
+    assert.match(JSON.stringify((await call('read', { path: join(cwd, 'disabled-ordinary.txt') })).content), /still allowed/);
+    await session.prompt('/memory project inherit');
+    assert.match(JSON.stringify((await call('read', { path })).content), /synthetic package memory/);
+    await session.prompt('/memory off');
+    await session.prompt('/memory project inherit');
+    await assert.rejects(call('read', { path }), /Memory is off/);
+    await session.prompt('/memory on');
+    assert.equal(await readFile(path, 'utf8').then((text) => text.includes('synthetic package memory')), true);
     const runner = session.extensionRunner;
     const options = () => ({ cwd, sections: { foreign: 'keep' }, selectedTools: ['read', 'write', 'edit'] });
     const first = await runner.emitBeforeAgentStart({ messageType: 'user', prompt: 'probe projection' }, options());

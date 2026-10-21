@@ -75,6 +75,55 @@ test("doctor uses the same report in explicit, menu and noninteractive commands 
   assert.equal(f.lifecycle.status().loaded, false);
 });
 
+test("both menus preserve label order and ignore cancelled or unknown selections", async (t) => {
+  for (const diagnostics of [false, true]) for (const choice of [undefined, "未知选项"]) {
+    await t.test(`${diagnostics ? "diagnostic" : "fallback"} menu: ${choice ?? "cancel"}`, async (t) => {
+      const f = await fixture(t);
+      const obtain = t.mock.method(f.runtime, "getStore", async () => f.store);
+      t.mock.method(f.store, "readBuffer", async () => { assert.fail("Menu must not read bodies"); });
+      t.mock.method(f.store, "readFull", async () => { assert.fail("Menu must not read bodies"); });
+      if (diagnostics) f.runtime.diagnostics = () => ({
+        agentDir: f.store.config.agentDir, child: true, assertCurrent() {},
+        identify: async () => { throw new Error("Child identity must not be inspected"); },
+        tools: () => ({ entries: [], paused: false }),
+      });
+      let selections = 0;
+      f.ui.select = async (title, labels) => {
+        selections++;
+        assert.equal(obtain.mock.callCount(), diagnostics ? 0 : 1);
+        assert.ok(title.startsWith(diagnostics ? "记忆管理\n" : "记忆：开启\n"));
+        assert.deepEqual(labels, ["列出文件", "刷新", "状态", "诊断", "开启全部项目", "关闭全部项目", "项目设置", "关联检查", "审阅记忆", "编辑文件", "删除文件"]);
+        return choice;
+      };
+      f.ui.editor = async () => { assert.fail("No editor after cancellation or unknown selection"); };
+      f.ui.confirm = async () => { assert.fail("No confirmation after cancellation or unknown selection"); };
+      await f.run("");
+      assert.equal(selections, 1);
+      assert.equal(obtain.mock.callCount(), diagnostics ? 0 : 1);
+      assert.equal(f.reports.length, diagnostics ? 0 : 1);
+      assert.equal(f.resets(), 0);
+      assert.equal((await f.store.config.read()).enabled, true);
+      assert.equal(await readFile(f.path, "utf8"), "original");
+    });
+  }
+});
+
+test("both menus retain the selected operation in Chinese error feedback", async (t) => {
+  for (const diagnostics of [false, true]) {
+    const f = await fixture(t);
+    await f.store.config.setEnabled(false);
+    if (diagnostics) f.runtime.diagnostics = () => ({
+      agentDir: f.store.config.agentDir, child: true, assertCurrent() {},
+      identify: async () => { throw new Error("Child identity must not be inspected"); },
+      tools: () => ({ entries: [], paused: false }),
+    });
+    f.ui.select = async () => "刷新";
+    await f.run("");
+    assert.match(f.reports.at(-1)!, /^刷新失败：.*记忆已关闭.*\/memory on/);
+    assert.equal(f.resets(), 0);
+  }
+});
+
 test("doctor extra arguments skip all probes and stale observations never publish a report", async (t) => {
   const f = await fixture(t);
   f.runtime.getStore = async () => { throw new Error("Store must not be obtained"); };
@@ -249,6 +298,229 @@ test("list skips file and directory links and never lists another project", asyn
   f.ui.select = async (_title, names) => { assert.deepEqual(names, ["topic.md"]); return undefined; };
   await f.run("list");
   assert.doesNotMatch(f.reports.join("\n"), /OTHER_PROJECT_BODY|other.md/);
+});
+
+test("project settings report the global, project and effective state and never bypass a global off", async (t) => {
+  const f = await fixture(t);
+  f.ctx.hasUI = false; f.ctx.mode = "print";
+  await f.run("project status");
+  assert.match(f.reports.at(-1)!, /全局开关：开启/);
+  assert.match(f.reports.at(-1)!, /项目设置：继承全局/);
+  assert.match(f.reports.at(-1)!, /有效状态：开启/);
+  await f.run("project off");
+  assert.match(f.reports.at(-1)!, /当前项目已禁用/);
+  assert.match(f.reports.at(-1)!, /其他项目与全局设置不变/);
+  assert.match(f.reports.at(-1)!, /有效状态：关闭（当前项目禁用）/);
+  assert.equal(f.reasons().filter((reason) => reason === "toggle").length, 1);
+  await f.run("project status");
+  assert.match(f.reports.at(-1)!, /项目设置：仅此项目禁用/);
+  await f.run("on");
+  assert.match(f.reports.at(-1)!, /全局记忆已开启/);
+  assert.equal((await f.store.effectiveState()).effectiveEnabled, false);
+  await f.run("off");
+  await f.run("project inherit");
+  assert.match(f.reports.at(-1)!, /恢复继承全局开关/);
+  assert.match(f.reports.at(-1)!, /当前有效状态仍为关闭/);
+  assert.equal((await f.store.effectiveState()).effectiveEnabled, false);
+  await f.run("on");
+  assert.equal((await f.store.effectiveState()).effectiveEnabled, true);
+  await f.run("project off");
+  await f.run("status");
+  assert.match(f.reports.at(-1)!, /项目设置：仅此项目禁用/);
+  assert.match(f.reports.at(-1)!, /当前项目已禁用：文件和历史保留/);
+  await f.run("reload");
+  assert.match(f.reports.at(-1)!, /刷新失败.*项目.*inherit|刷新失败.*project inherit/);
+  await f.run("project inherit");
+  assert.match(f.reports.at(-1)!, /快照将在下一条用户任务时加载/);
+  const reasonsBefore = f.reasons().length;
+  await f.run("project unknown-action");
+  assert.match(f.reports.at(-1)!, /用法：\/memory project status \| off \| inherit/);
+  assert.equal(f.reasons().length, reasonsBefore);
+});
+
+test("check reports structural links and topics without reading bodies or granting model coverage", async (t) => {
+  const f = await fixture(t);
+  await f.writer.write(join(f.store.paths.projectDir, "MEMORY.md"), "# Memory\n\n- [主题](topic.md) — described\n- [断链](missing.md)\n- [重复](topic.md)\n");
+  await f.run("check topic.md");
+  const report = f.reports.at(-1)!;
+  assert.match(report, /记忆关联检查/);
+  assert.match(report, /主题：topic\.md；存在/);
+  assert.match(report, /索引入口：2 个/);
+  assert.match(report, /重复：topic\.md/);
+  assert.match(report, /缺失：missing\.md/);
+  assert.match(report, /未修改文件/);
+  assert.doesNotMatch(report, /original/);
+  const readBuffer = t.mock.method(MemoryStore.prototype, "readBuffer", async () => { assert.fail("check must not read topic bodies"); });
+  await f.run("check");
+  assert.match(f.reports.at(-1)!, /本地链接/);
+  readBuffer.mock.restore();
+  await f.store.config.setProjectDisabled(f.store.paths.projectId, true);
+  await f.run("check topic.md");
+  assert.match(f.reports.at(-1)!, /关联检查失败.*记忆已关闭/);
+  await f.store.config.setProjectDisabled(f.store.paths.projectId, false);
+  await f.run("check ../outside.md");
+  assert.match(f.reports.at(-1)!, /目标必须是当前项目的相对文件名/);
+});
+
+test("check and review describe disk entries without refreshing a prepared session snapshot", async (t) => {
+  const f = await fixture(t);
+  const indexPath = join(f.store.paths.projectDir, "MEMORY.md");
+  await f.writer.write(indexPath, "# Original snapshot\n");
+  await f.task();
+  assert.equal(f.lifecycle.status().loaded, true);
+  const activityBefore = f.activity.snapshot();
+  const resetsBefore = f.resets();
+  const reasonsBefore = [...f.reasons()];
+  const link = "[主题](topic.md)";
+  const index = `${link}${"x".repeat(25 * 1024 - Buffer.byteLength(link))}${link}`;
+  await writeFile(indexPath, index);
+  await f.run("check topic.md");
+  const report = f.reports.at(-1)!;
+  assert.match(report, /索引入口：2 个/);
+  assert.match(report, /第 1 行，第 1 列/);
+  assert.match(report, /加载范围外/);
+  assert.match(report, /检查时点的磁盘索引/);
+  assert.match(report, /当前会话可能复用旧快照/);
+  const bodies: string[] = [];
+  f.ui.editor = async (title, prefill) => { bodies.push(`${title}\n${prefill}`); return prefill; };
+  f.ui.select = async () => "保留";
+  await f.run("review topic.md");
+  assert.equal(bodies[0], "记忆审阅：topic.md — 前 200 行 / 25KiB\noriginal");
+  const reviewReport = f.reports.find((text) => text.startsWith("记忆审阅：topic.md\n"))!;
+  assert.match(reviewReport, /第 1 行，第 1 列/);
+  assert.match(reviewReport, /加载范围外/);
+  assert.match(reviewReport, /磁盘索引下次加载的候选范围/);
+  assert.match(reviewReport, /不代表当前模型请求已包含入口/);
+  assert.equal(f.lifecycle.status().loaded, true);
+  assert.deepEqual(f.activity.snapshot(), activityBefore);
+  assert.equal(f.resets(), resetsBefore);
+  assert.deepEqual(f.reasons(), reasonsBefore);
+  assert.equal(await readFile(indexPath, "utf8"), index);
+  assert.equal(await readFile(f.path, "utf8"), "original");
+  await assert.rejects(f.store.write(indexPath, "overwrite index"), /no complete read baseline/);
+  await assert.rejects(f.store.write(f.path, "overwrite topic"), /no complete read baseline/);
+});
+
+test("review displays a bounded topic and routes keep, edit, delete and back without writing", async (t) => {
+  const f = await fixture(t);
+  await f.writer.write(join(f.store.paths.projectDir, "MEMORY.md"), "# Memory\n\n- [主题](topic.md) — described\n");
+  const bodies: string[] = [];
+  const choices: (string | undefined)[] = ["保留"];
+  f.ui.editor = async (title, prefill) => { bodies.push(`${title}\n${prefill}`); return prefill; };
+  f.ui.select = async (title, options) => {
+    if (title.startsWith("记忆审阅：选择一个主题")) return "topic.md";
+    if (title.startsWith("记忆审阅：topic.md")) { assert.deepEqual(options, ["保留", "编辑", "删除", "返回列表"]); return choices.shift(); }
+    return undefined;
+  };
+  await f.run("review topic.md");
+  assert.match(bodies[0], /记忆审阅：topic\.md/);
+  assert.match(bodies[0], /original/);
+  assert.match(f.reports.at(-1)!, /已保留该主题；未写入 reviewed 标记/);
+  assert.equal(await readFile(f.path, "utf8"), "original");
+  assert.doesNotMatch(f.reports.join("\n"), /修改时间：\d{4}-/);
+  f.ui.editor = async (title, prefill) => { bodies.push(title); return prefill; };
+  f.ui.select = async (title) => title.startsWith("记忆审阅：选择一个主题") ? (bodies.length < 2 ? "topic.md" : undefined) : "返回列表";
+  await f.run("review");
+  assert.equal(bodies.length, 2);
+  f.ui.editor = async () => undefined;
+  f.ui.select = async (title) => title.startsWith("记忆审阅：选择一个主题") ? "topic.md" : "保留";
+  await f.run("review");
+  assert.match(f.reports.at(-1)!, /已取消审阅；文件未更改/);
+  f.ctx.hasUI = false;
+  await f.run("review topic.md");
+  assert.match(f.reports.at(-1)!, /记忆审阅需要交互式查看与动作选择/);
+  f.ctx.hasUI = true;
+  await assert.rejects(f.run("review MEMORY.md").then(() => { throw new Error(f.reports.at(-1)); }), /requires a topic file|审阅失败/);
+});
+
+test("review editor changes, edit routing and delete routing use the existing submission chain", async (t) => {
+  const f = await fixture(t);
+  let mode: "edit" | "delete" | "keep" = "edit";
+  f.ui.select = async (title, options) => title.startsWith("记忆审阅：选择一个主题") ? "topic.md" : mode === "edit" ? "编辑" : mode === "delete" ? "删除" : "保留";
+  f.ui.editor = async (_title, prefill) => mode === "edit" ? `${prefill}\nreviewed edit` : prefill;
+  await f.run("review");
+  assert.match(await readFile(f.path, "utf8"), /reviewed edit/);
+  assert.match(f.reports.join("\n"), /主题文件已保存/);
+  mode = "delete";
+  f.ui.confirm = async () => false;
+  await f.run("review");
+  assert.equal(await readFile(f.path, "utf8").then(() => true), true);
+  assert.match(f.reports.at(-1)!, /已取消删除/);
+  f.ui.confirm = async () => true;
+  await f.run("review");
+  await assert.rejects(stat(f.path), { code: "ENOENT" });
+  mode = "keep";
+  await f.run("review");
+  assert.match(f.reports.at(-1)!, /没有可审阅的主题文件/);
+});
+
+test("review rejects stale session and disabled state before showing bodies", async (t) => {
+  const f = await fixture(t);
+  f.ui.select = async (title) => title.startsWith("记忆审阅：选择一个主题") ? "topic.md" : "保留";
+  f.ui.editor = async () => { assert.fail("no body after invalidation"); };
+  await f.store.config.setProjectDisabled(f.store.paths.projectId, true);
+  await f.run("review topic.md");
+  assert.match(f.reports.at(-1)!, /当前项目已禁用，审阅已停止.*文件未更改/);
+  await f.store.config.setProjectDisabled(f.store.paths.projectId, false);
+  f.ui.select = async (title) => {
+    if (title.startsWith("记忆审阅：选择一个主题")) {
+      f.emit("session_start");
+      throw Object.assign(new Error("Memory operation invalidated by a session change; reread and retry."));
+    }
+    return "保留";
+  };
+  await f.run("review");
+  assert.match(f.reports.at(-1)!, /审阅失败.*会话变化/);
+});
+
+test("review rechecks the effective state before showing the body and before an action", async (t) => {
+  for (const phase of ["before-show", "after-editor", "before-action"]) {
+    await t.test(phase, async (t) => {
+      const f = await fixture(t);
+      let editorCalls = 0;
+      f.ui.editor = async (_title, prefill) => {
+        editorCalls++;
+        if (phase === "after-editor") await f.store.config.setProjectDisabled(f.store.paths.projectId, true);
+        return prefill;
+      };
+      let selectCalls = 0;
+      f.ui.select = async (title) => {
+        selectCalls++;
+        if (title.startsWith("记忆审阅：选择一个主题")) {
+          if (phase === "before-show") await f.store.config.setProjectDisabled(f.store.paths.projectId, true);
+          return "topic.md";
+        }
+        if (phase === "before-action") await f.store.config.setProjectDisabled(f.store.paths.projectId, true);
+        return "保留";
+      };
+      await f.run("review");
+      assert.match(f.reports.at(-1)!, /审阅已停止.*文件未更改/, phase);
+      assert.equal(await readFile(f.path, "utf8"), "original", phase);
+      if (phase === "before-show") assert.equal(editorCalls, 0);
+      if (phase === "before-show") assert.equal(selectCalls, 1);
+      if (phase === "before-action") assert.equal(editorCalls, 1);
+    });
+  }
+});
+
+test("project settings require a trusted project identity and failed writes do not reset", async (t) => {
+  const f = await fixture(t);
+  f.ctx.hasUI = false; f.ctx.mode = "print";
+  f.store.markIdentityUnverified();
+  await f.run("project off");
+  assert.match(f.reports.at(-1)!, /项目设置不可用：项目身份未建立/);
+  const initial = await f.store.config.read();
+  assert.equal(initial.status === "known" && initial.data.version, 1);
+  f.store = await makeStore(join(f.root, "agent"));
+  f.runtime.getStore = async () => f.store;
+  const resetsBefore = f.reasons().length;
+  const setProjectDisabled = f.store.config.setProjectDisabled.bind(f.store.config);
+  t.mock.method(f.store.config, "setProjectDisabled", async () => { throw new Error("injected project write failure"); });
+  await f.run("project off");
+  assert.match(f.reports.at(-1)!, /项目设置失败/);
+  assert.equal(f.reasons().length, resetsBefore);
+  t.mock.restoreAll();
+  assert.deepEqual(await setProjectDisabled("not-a-project", true).catch((error: Error) => error.message), "Memory project setting rejected: an invalid current project identity was provided.");
 });
 
 test("list rejects selection after off, unknown config, session changes, deletion or link replacement", async (t) => {

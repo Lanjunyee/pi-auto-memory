@@ -76,24 +76,37 @@ test("observer exceptions cannot turn a completed commit into a failed save", as
 
 
 test("a commit remains observable when host cancellation happens after replacement", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "memory-activity-post-commit-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const base = await makeStore(join(root, "agent"));
-  const activity = new MemoryActivity();
-  const store = new MemoryStore(base.paths, base.config, false, undefined, undefined, activity.bind(base.paths.projectDir));
-  const abort = new AbortController();
-  const mutate = store.mutate.bind(store);
-  store.mutate = async function<T>(path: string, action: (file: LockedFile) => Promise<T>, hooks: AtomicHooks = {}): Promise<T> {
-    return mutate(path, (file) => action({ ...file, write: async (text) => {
-      const saved = await file.write(text);
-      abort.abort();
-      return saved;
-    } }), hooks);
-  };
-  const path = join(store.paths.projectDir, "saved.md");
-  const result = await managedFileTools(root, store).write.execute("cancelled", { path, content: "committed" }, abort.signal, undefined, { cwd: root } as ExtensionToolContext);
-  assert.equal(result.isError, true);
-  assert.match(JSON.stringify(result), /file IS SAVED/);
-  assert.equal(activity.snapshot().lastSave!.path, "saved.md");
-  assert.equal(await readFile(path, "utf8"), "committed");
+  for (const operation of ["write", "edit"] as const) await t.test(operation, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "memory-activity-post-commit-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const base = await makeStore(join(root, "agent"));
+    const activity = new MemoryActivity();
+    const store = new MemoryStore(base.paths, base.config, false, undefined, undefined, activity.bind(base.paths.projectDir));
+    const path = join(store.paths.projectDir, "saved.md");
+    if (operation === "edit") {
+      await store.write(path, "original");
+      activity.reset();
+    }
+    assert.equal(activity.snapshot().lastSave, undefined);
+    const abort = new AbortController();
+    const mutate = store.mutate.bind(store);
+    store.mutate = async function<T>(path: string, action: (file: LockedFile) => Promise<T>, hooks: AtomicHooks = {}): Promise<T> {
+      return mutate(path, (file) => action({ ...file, write: async (text) => {
+        const saved = await file.write(text);
+        abort.abort();
+        return saved;
+      } }), hooks);
+    };
+    const tools = managedFileTools(root, store);
+    const ctx = { cwd: root } as ExtensionToolContext;
+    const result = operation === "write"
+      ? await tools.write.execute("cancelled", { path, content: "committed" }, abort.signal, undefined, ctx)
+      : await tools.edit.execute("cancelled", { path, edits: [{ oldText: "original", newText: "committed" }] }, abort.signal, undefined, ctx);
+    assert.equal(result.isError, true);
+    assert.match(JSON.stringify(result), /file IS SAVED/);
+    assert.equal(activity.snapshot().lastSave!.path, "saved.md");
+    assert.equal(activity.snapshot().lastSave!.source, "model");
+    assert.equal(activity.snapshot().topics.length, 0);
+    assert.equal(await readFile(path, "utf8"), "committed");
+  });
 });

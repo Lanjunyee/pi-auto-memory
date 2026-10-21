@@ -206,6 +206,34 @@ test("memory root and ancestors retain ordinary results, while off/unknown/child
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
+test("project-disable prunes memory like a global off, and a disable before results return discards them", { skip: !hasBinaries }, async (t) => {
+  const f = await fixture();
+  try {
+    const context = ctx(f.root);
+    assert.match(text(await f.tools.grep.execute("g", { pattern: "needle", path: f.store.paths.projectDir }, undefined, undefined, context)), /current/);
+    await f.store.config.setProjectDisabled(f.store.paths.projectId, true);
+    await assert.rejects(f.tools.grep.execute("g", { pattern: "needle", path: f.store.paths.projectDir }, undefined, undefined, context), /Memory is off/);
+    const ancestor = text(await f.tools.grep.execute("g", { pattern: "needle" }, undefined, undefined, context));
+    assert.match(ancestor, /ordinary/);
+    assert.doesNotMatch(ancestor, /current|FORBIDDEN/);
+    assert.equal(text(await f.tools.ls.execute("l", { path: f.store.paths.memoryRoot }, undefined, undefined, context)), "(empty directory)");
+    await f.store.config.setProjectDisabled(f.store.paths.projectId, false);
+    const read = f.store.config.read.bind(f.store.config);
+    let calls = 0;
+    t.mock.method(f.store.config, "read", async () => {
+      calls++;
+      const state = await read();
+      if (calls >= 2 && state.status === "known") {
+        return { ...state, data: { ...state.data, version: 2 as const, disabledProjects: [f.store.paths.projectId] }, enabled: state.enabled };
+      }
+      return state;
+    });
+    const midScan = await f.tools.grep.execute("g", { pattern: "needle", path: f.store.paths.projectDir }, undefined, undefined, context).then(() => "resolved", (error: Error) => error.message);
+    assert.match(String(midScan), /Memory scan invalidated by a settings change/);
+    assert.equal(calls >= 2, true);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
 test("ls excludes forbidden names before child stat; memory symlinks are refused and never followed", { skip: !hasBinaries }, async () => {
   const f = await fixture();
   const originalStat = fsPromises.stat;

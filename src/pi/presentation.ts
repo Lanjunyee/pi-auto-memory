@@ -48,7 +48,7 @@ function classify(error: unknown): Classification {
   if (message.startsWith("Memory ")) {
     if (message.startsWith("Memory paused:")) return paused(message);
     if (message.startsWith("Memory is off")) {
-      return { text: "记忆已关闭，当前操作被拒绝。", advice: "请先执行 /memory on。", doctor: false };
+      return { text: "记忆已关闭，当前操作被拒绝。", advice: "请先执行 /memory on；若仅当前项目被禁用，请执行 /memory project inherit。", doctor: false };
     }
     if (message.startsWith("Memory save rejected:")) {
       if (/detected /.test(message)) return { text: "保存被拒绝：检测到疑似敏感凭据，未写入文件。", advice: "请移除秘密，改用不含凭据的引用。", doctor: false };
@@ -56,6 +56,10 @@ function classify(error: unknown): Classification {
       if (/no complete read baseline/.test(message)) return { text: "保存被拒绝：缺少完整读取基线，文件未写入。", advice: "请重新完整读取文件后再保存。", doctor: false };
       return { text: "保存被拒绝，文件未写入。", advice: "请重新读取文件后再试。", doctor: false };
     }
+    if (message.startsWith("Memory project setting rejected:")) {
+      return { text: "项目设置被拒绝，未写入配置。", advice: "请检查项目身份和 auto-memory.json 的项目字段后重试。", doctor: true };
+    }
+    if (message.startsWith("Memory scan invalidated")) return { text: "扫描期间记忆设置发生变化，已丢弃本次结果。", advice: "请重新执行扫描。", doctor: false };
     if (message.startsWith("Memory conflict:")) {
       if (/removed/.test(message)) return { text: "保存冲突：文件已被移除。", advice: "请重新读取后再保存。", doctor: false };
       return { text: "保存冲突：文件版本已变化。", advice: "请重新完整读取后再保存。", doctor: false };

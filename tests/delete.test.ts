@@ -26,6 +26,23 @@ test("confirmed deletion while off uses metadata only and deletes exactly one pr
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("confirmed deletion remains available when only the current project is disabled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-delete-project-"));
+  try {
+    const store = await makeStore(root);
+    const a = join(store.paths.projectDir, "a.md");
+    const b = join(store.paths.projectDir, "b.md");
+    await store.write(a, "selected"); await store.write(b, "kept");
+    await store.config.setProjectDisabled(store.paths.projectId, true);
+    if (process.platform !== "win32") await chmod(a, 0o000);
+    await assert.rejects(store.readFull(a), /Memory is off/);
+    const target = await store.prepareDelete(a);
+    assert.deepEqual(await store.deleteConfirmed(target, true), { deleted: true });
+    await assert.rejects(readFile(a), { code: "ENOENT" });
+    assert.equal(await readFile(b, "utf8"), "kept");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("delete confirmation rejects replaced, in-place modified and session-invalidated targets", async () => {
   const root = await mkdtemp(join(tmpdir(), "auto-memory-delete-version-"));
   try {

@@ -2,7 +2,7 @@ import { constants, type Stats } from "node:fs";
 import { access, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { VERSION } from "@earendil-works/pi-coding-agent";
-import { MemoryConfig } from "../core/config.js";
+import { MemoryConfig, resolveEffectiveState } from "../core/config.js";
 import { MemoryPaths } from "../core/paths.js";
 import { hostVersionStatus, SUPPORTED_HOST_RANGE } from "../core/constants.js";
 import type { DiagnosticContext } from "./registration.js";
@@ -48,7 +48,7 @@ export async function diagnoseMemory(context: DiagnosticContext, options: Doctor
   add("runtime.scope", context.child ? "failure" : "ok", context.child ? "runner 子会话不受支持；已跳过项目记忆检查。" : "当前为独立主会话；其他平台和扩展组合需要单独验证。");
   try {
     const config = await probe(async () => (await MemoryConfig.create(context.agentDir)).inspect());
-    if (config.status === "known") add("config", "ok", config.missing ? "配置不存在；记忆默认开启。" : `配置有效；记忆当前为${config.enabled ? "开启" : "关闭"}。`);
+    if (config.status === "known") add("config", "ok", config.missing ? "配置不存在；全局记忆默认开启，项目默认继承。" : `配置有效；全局开关${config.enabled ? "开启" : "关闭"}${config.data.version === 2 ? "，包含项目设置" : ""}。`);
     else {
       const reasons = { "unreadable": "配置无法读取。", "unsafe-path": "配置路径不是普通文件或属于符号链接。", "invalid-format": "配置格式无效。", "unsupported-version": "配置版本不受支持。" };
       add("config", "failure", reasons[config.reason], "请检查 auto-memory.json 的格式、版本、路径或权限并进行修复；本次未执行任何修复。");
@@ -79,13 +79,25 @@ export async function diagnoseMemory(context: DiagnosticContext, options: Doctor
     add("project.index", "unchecked", "runner 子会话不检查索引元数据。");
   } else {
     let paths: MemoryPaths | undefined;
+    let projectId: string | undefined;
     try {
       const project = await probe(() => context.identify());
+      projectId = project.projectId;
       paths = await probe(() => MemoryPaths.create(context.agentDir, project.projectId));
       add("project.identity", "ok", `已解析${project.kind === "git" ? " Git 仓库" : "工作目录"}项目身份。`);
     } catch {
       add("project.identity", "failure", "项目身份或其记忆位置不可用。", "请修复仓库、Git 配置或 agent 目录；本次未检查回退路径。");
     }
+    context.assertCurrent();
+    if (projectId) {
+      const inspection = await probe(async () => (await MemoryConfig.create(context.agentDir)).inspect());
+      if (inspection.status === "known") {
+        const effective = resolveEffectiveState(inspection, projectId);
+        add("project.setting", "ok", effective.status === "known" && effective.projectPolicy === "disabled"
+          ? "当前项目设置：禁用（不改变全局开关）。"
+          : "当前项目设置：继承全局开关。");
+      } else add("project.setting", "unchecked", "配置不可读取；未检查项目设置。");
+    } else add("project.setting", "unchecked", "项目身份不可用；已跳过项目设置检查。");
     context.assertCurrent();
     if (!paths) {
       add("project.directory", "unchecked", "项目身份不可用；已跳过目录检查。");

@@ -141,16 +141,16 @@ export function registerLifecycle(pi: ExtensionAPI, runtime: LifecycleRuntime) {
       if (entered !== generation) return;
       store = current;
       if (current.child) { snapshot = undefined; coverage = undefined; enabled = false; return; }
-      const config = await current.config.read();
+      const effective = await current.effectiveState();
       if (entered !== generation) return;
-      if (config.status === "unknown" || !config.enabled) {
+      if (effective.status === "unknown" || !effective.effectiveEnabled) {
         if (enabled !== false) current.invalidate();
         if (enabled !== false) runtime.activity?.reset("toggle");
         enabled = false;
         attempted = false;
         snapshot = undefined;
         coverage = undefined;
-        if (config.status === "unknown") warn(ctx, config.fault);
+        if (effective.status === "unknown") warn(ctx, effective.fault);
         else fault = undefined;
         return;
       }
@@ -196,11 +196,12 @@ export function registerLifecycle(pi: ExtensionAPI, runtime: LifecycleRuntime) {
       warn(ctx, "Memory paused: index or memory configuration could not be read safely; normal tasks can continue. Use /memory reload, re-enter the session or re-enable memory to retry.");
     }
   });
-  pi.on("context_with_system", (event, ctx) => {
+  pi.on("context_with_system", async (event, ctx) => {
     if (compatibilityPaused) {
       return withdrawnSnapshot === undefined ? undefined : { messages: withoutCurrentMemory(event.messages, withdrawnSnapshot) };
     }
     if (snapshot === undefined || enabled !== true) return;
+    const entered = generation;
     try {
       runtime.assertCompatible?.();
     } catch {
@@ -208,6 +209,33 @@ export function registerLifecycle(pi: ExtensionAPI, runtime: LifecycleRuntime) {
       dropProjection();
       warn(ctx, COMPATIBILITY_FAULT);
       return { messages: withoutCurrentMemory(event.messages, stale) };
+    }
+    try {
+      if (!store) throw new Error(COMPATIBILITY_FAULT);
+      const effective = await store.effectiveState();
+      if (entered !== generation) return;
+      if (effective.status === "unknown" || !effective.effectiveEnabled) {
+        const stale = snapshot;
+        store.invalidate();
+        enabled = false;
+        attempted = false;
+        snapshot = undefined;
+        coverage = undefined;
+        runtime.activity?.reset("toggle");
+        if (effective.status === "unknown") warn(ctx, effective.fault);
+        else {
+          fault = undefined;
+          if (ctx.hasUI) ctx.ui.notify("记忆已关闭或当前项目已禁用；本次请求未注入新的记忆快照。", "warning");
+        }
+        return { messages: withoutCurrentMemory(event.messages, stale) };
+      }
+    } catch {
+      if (entered !== generation) return;
+      if (!store) return;
+      const stale = snapshot;
+      snapshot = undefined;
+      coverage = undefined;
+      return { messages: withoutCurrentMemory(event.messages, stale!) };
     }
     try {
       const messages = projectMemorySection(event.messages, snapshot);

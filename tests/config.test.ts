@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { MemoryConfig } from "../src/core/config.js";
+import { MemoryConfig, isProjectId, projectDisabled, projectPolicy, resolveEffectiveState } from "../src/core/config.js";
 import { MemoryPaths } from "../src/core/paths.js";
 import { fixtureChild } from "./helpers/child.js";
 
@@ -12,7 +12,7 @@ test("missing config defaults on; corrupt, unsupported and linked config pause w
   try {
     const config = await MemoryConfig.create(root);
     assert.deepEqual(await config.read(), { status: "known", enabled: true, data: { version: 1, enabled: true }, missing: true });
-    for (const invalid of ["{", "null", "[]", '{"version":2,"enabled":true}', '{"version":1,"enabled":"yes"}']) {
+    for (const invalid of ["{", "null", "[]", '{"version":3,"enabled":true}', '{"version":1,"enabled":"yes"}', '{"version":2,"enabled":true}', '{"version":2,"enabled":true,"disabledProjects":"x"}']) {
       await writeFile(config.path, invalid);
       assert.equal((await config.read()).status, "unknown");
       await assert.rejects(config.setEnabled(false), /repair it/);
@@ -22,6 +22,41 @@ test("missing config defaults on; corrupt, unsupported and linked config pause w
     await writeFile(join(root, "foreign.json"), '{"version":1,"enabled":true}');
     await symlink(join(root, "foreign.json"), config.path);
     assert.equal((await config.read()).status, "unknown");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("v1 and v2 configs resolve a pure project-effective state without migration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-config-effective-"));
+  try {
+    const config = await MemoryConfig.create(root);
+    const project = `cwd-${"a".repeat(64)}`;
+    const other = `git-${"b".repeat(64)}`;
+    const v1 = { status: "known" as const, enabled: true, data: { version: 1 as const, enabled: true }, missing: false };
+    assert.deepEqual(resolveEffectiveState(v1, project), { status: "known", globalEnabled: true, projectPolicy: "inherit",
+      effectiveEnabled: true, reason: "enabled", data: v1.data, missing: false });
+    const v1Off = { ...v1, enabled: false, data: { version: 1 as const, enabled: false } };
+    const offState = resolveEffectiveState(v1Off, project);
+    assert.equal(offState.effectiveEnabled, false);
+    assert.equal(offState.status === "known" && offState.reason, "global-off");
+    const v2 = { status: "known" as const, enabled: true,
+      data: { version: 2 as const, enabled: true, disabledProjects: [project] }, missing: false };
+    const disabledState = resolveEffectiveState(v2, project);
+    assert.equal(disabledState.effectiveEnabled, false);
+    assert.equal(disabledState.status === "known" && disabledState.reason, "project-disabled");
+    assert.equal(resolveEffectiveState(v2, other).effectiveEnabled, true);
+    assert.equal(resolveEffectiveState({ status: "unknown", enabled: false, fault: "x" }, project).status, "unknown");
+    assert.equal(projectDisabled(v1.data, project), false);
+    assert.equal(projectPolicy(v2.data, project), "disabled");
+    assert.equal(projectPolicy(v2.data, other), "inherit");
+    assert.equal(isProjectId(project), true);
+    assert.equal(isProjectId("cwd-abc"), false);
+
+    await writeFile(config.path, JSON.stringify(v1Off.data));
+    const before = await readFile(config.path);
+    await config.read();
+    await config.inspect();
+    assert.deepEqual(await readFile(config.path), before);
+    assert.deepEqual(JSON.parse(await readFile(config.path, "utf8")), { version: 1, enabled: false });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -62,13 +97,22 @@ test("inspection reports known, missing, unsafe-path, invalid-format and unsuppo
       await writeFile(config.path, corrupt);
       assert.deepEqual(await config.inspect(), { status: "unknown", enabled: false, reason: "invalid-format" });
     }
-    for (const invalid of ["null", "[]", "3", '"string"', '{"version":1,"enabled":"yes"}']) {
+    for (const invalid of ["null", "[]", "3", '"string"', '{"version":1,"enabled":"yes"}', '{"version":2,"enabled":true}']) {
       await writeFile(config.path, invalid);
       assert.deepEqual(await config.inspect(), { status: "unknown", enabled: false, reason: "invalid-format" });
     }
-    for (const unsupported of ["{}", '{"enabled":true}', '{"version":2,"enabled":true}', '{"version":0,"enabled":true}', '{"version":"1","enabled":true}']) {
+    for (const unsupported of ["{}", '{"enabled":true}', '{"version":3,"enabled":true}', '{"version":0,"enabled":true}', '{"version":"1","enabled":true}']) {
       await writeFile(config.path, unsupported);
       assert.deepEqual(await config.inspect(), { status: "unknown", enabled: false, reason: "unsupported-version" });
+    }
+    const v2 = { version: 2, enabled: true, disabledProjects: [`git-${"c".repeat(64)}`] };
+    await writeFile(config.path, JSON.stringify(v2));
+    assert.deepEqual(await config.inspect(), { status: "known", enabled: true, data: v2, missing: false });
+    for (const invalidProjects of [{ version: 2, enabled: true, disabledProjects: "x" },
+      { version: 2, enabled: true, disabledProjects: ["cwd-short"] },
+      { version: 2, enabled: true, disabledProjects: [`cwd-${"d".repeat(64)}`, `cwd-${"d".repeat(64)}`] }]) {
+      await writeFile(config.path, JSON.stringify(invalidProjects));
+      assert.deepEqual(await config.inspect(), { status: "unknown", enabled: false, reason: "invalid-format" });
     }
     await rm(config.path);
     await writeFile(join(root, "foreign.json"), '{"version":1,"enabled":true}');
@@ -116,6 +160,77 @@ test("real processes reread under the config lock and preserve concurrent fields
     const c = fixtureChild("tests/fixtures/config-worker.ts", [root, "off"]); children.push(c);
     await c.next("locked"); c.go(); await c.next("done");
     assert.deepEqual(JSON.parse(await readFile(config.path, "utf8")), { version: 1, enabled: false, "field-a": true, "field-b": true });
+    for (const child of children) assert.equal(await child.exited, 0);
+  } finally {
+    for (const child of children) if (child.child.exitCode === null) child.child.kill();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("project settings update under the config lock and keep global and other project data", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-config-project-"));
+  try {
+    const config = await MemoryConfig.create(root);
+    const first = `cwd-${"a".repeat(64)}`;
+    const second = `git-${"b".repeat(64)}`;
+    await writeFile(config.path, JSON.stringify({ version: 1, enabled: true, foreign: { keep: true } }));
+    const upgraded = await config.setProjectDisabled(first, true);
+    assert.equal(upgraded.status, "known");
+    assert.deepEqual(JSON.parse(await readFile(config.path, "utf8")), { version: 2, enabled: true, foreign: { keep: true }, disabledProjects: [first] });
+    await config.setProjectDisabled(second, true);
+    await config.setEnabled(false);
+    assert.deepEqual(JSON.parse(await readFile(config.path, "utf8")), { version: 2, enabled: false, foreign: { keep: true }, disabledProjects: [first, second] });
+    await config.setEnabled(true);
+    await config.setProjectDisabled(first, false);
+    assert.deepEqual(JSON.parse(await readFile(config.path, "utf8")), { version: 2, enabled: true, foreign: { keep: true }, disabledProjects: [second] });
+    await assert.rejects(config.setProjectDisabled("not-a-project", true), /invalid current project identity/);
+    await assert.rejects(config.setProjectDisabled(first.toUpperCase(), true), /invalid current project identity/);
+
+    await writeFile(config.path, JSON.stringify({ version: 1, enabled: true, disabledProjects: ["foreign"] }));
+    await assert.rejects(config.setProjectDisabled(first, true), /reserves disabledProjects/);
+    assert.deepEqual(JSON.parse(await readFile(config.path, "utf8")), { version: 1, enabled: true, disabledProjects: ["foreign"] });
+
+    const prior = await readFile(config.path);
+    await writeFile(config.path, JSON.stringify({ version: 2, enabled: true, disabledProjects: [] }));
+    const priorV2 = await readFile(config.path);
+    await assert.rejects(config.setProjectDisabled(first, true, { write: async (handle) => {
+      await handle.writeFile("partial"); throw new Error("injected project write failure");
+    } }), /injected project write failure/);
+    assert.deepEqual(await readFile(config.path), priorV2);
+    assert.notDeepEqual(priorV2, prior);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a v2 config is rejected by the legacy version gate instead of being silently enabled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-config-v2-legacy-"));
+  try {
+    const config = await MemoryConfig.create(root);
+    const project = `cwd-${"a".repeat(64)}`;
+    await writeFile(config.path, JSON.stringify({ version: 2, enabled: true, disabledProjects: [project] }));
+    const legacyGate = (data: { version?: unknown; enabled?: unknown }) => data.version === 1 && typeof data.enabled === "boolean";
+    assert.equal(legacyGate(JSON.parse(await readFile(config.path, "utf8"))), false);
+    assert.equal((await config.inspect()).status, "known");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("concurrent project and global updates reread under the lock and lose no fields", { timeout: 15_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-config-project-processes-"));
+  const children: ReturnType<typeof fixtureChild>[] = [];
+  try {
+    const config = await MemoryConfig.create(root);
+    const first = `cwd-${"a".repeat(64)}`;
+    const second = `git-${"b".repeat(64)}`;
+    const a = fixtureChild("tests/fixtures/config-worker.ts", [root, "disable", first]); children.push(a);
+    await a.next("locked");
+    const b = fixtureChild("tests/fixtures/config-worker.ts", [root, "disable", second]); children.push(b);
+    a.go(); await a.next("done");
+    await b.next("locked"); b.go(); await b.next("done");
+    const c = fixtureChild("tests/fixtures/config-worker.ts", [root, "off"]); children.push(c);
+    await c.next("locked"); c.go(); await c.next("done");
+    assert.deepEqual(JSON.parse(await readFile(config.path, "utf8")), { version: 2, enabled: false, disabledProjects: [first, second] });
+    const d = fixtureChild("tests/fixtures/config-worker.ts", [root, "inherit", first]); children.push(d);
+    await d.next("locked"); d.go(); await d.next("done");
+    assert.deepEqual(JSON.parse(await readFile(config.path, "utf8")), { version: 2, enabled: false, disabledProjects: [second] });
     for (const child of children) assert.equal(await child.exited, 0);
   } finally {
     for (const child of children) if (child.child.exitCode === null) child.child.kill();

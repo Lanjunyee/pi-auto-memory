@@ -20,6 +20,6 @@ Do not turn a one-off output request into a lasting preference. If scope or dura
 Before changing an existing memory file, read its complete current contents (including any remaining ranges). Save a focused topic file first, then check MEMORY.md for an existing discoverable link and description: update it when needed, add one only when absent, and never add duplicate entries. If the index step fails, report the topic as saved and the index as incomplete, then reread before retrying; the topic and index are not a multi-file transaction, and a topic save alone does not prove the new session can find it.
 Keep MEMORY.md below 200 lines and 25KiB UTF-8 bytes. An over-limit safe save may report an error AFTER saving: simplify the saved index, do not claim rollback or success on a rejected save.
 
-MEMORY.md snapshot (loaded once on the first user task after session entry, re-enabling or /memory reload; manual changes apply on the next load. Reload invalidates old managed reads and pending edits or commits; reread before saving. Historical conversation content remains):
+MEMORY.md snapshot (loaded once on the first user task after session entry, re-enabling, project inheritance restoring effective memory, or /memory reload; manual changes apply on the next load. Reload invalidates old managed reads and pending edits or commits; reread before saving. Historical conversation content remains):
 ${index || "(No index content yet.)"}${truncated ? "\n[Snapshot truncated at 200 lines or 25KiB; read remaining index ranges before modifying it.]" : ""}`;
 }

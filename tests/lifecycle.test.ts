@@ -66,6 +66,62 @@ async function harness(t: TestContext, text?: string | Buffer, child = false) {
     counts: () => ({ reads, configs, resets, compatibilityChecks }) };
 }
 
+test("lifecycle: project disable stops loading and projection, and inheritance reloads on the next task", async (t) => {
+  const f = await harness(t, "PROJECT_INDEX");
+  const loaded = await f.task();
+  assert.match(loaded.auto_memory, /PROJECT_INDEX/);
+  await f.store.config.setProjectDisabled(f.paths.projectId, true);
+  const projected = await f.project([system({ auto_memory: wrap(loaded.auto_memory) }), user]);
+  assert.equal(projected[0].role, "system");
+  if (projected[0].role !== "system") throw new Error();
+  assert.equal(projected[0].sections?.auto_memory, undefined);
+  assert.equal(projected[0].sections?.foreign, undefined);
+  assert.equal(f.controller.status().loaded, false);
+  await writeFile(f.path, "RELOADED_AFTER_INHERIT");
+  assert.equal((await f.task()).auto_memory, undefined);
+  await f.store.config.setProjectDisabled(f.paths.projectId, false);
+  const reloaded = await f.task();
+  assert.match(reloaded.auto_memory, /RELOADED_AFTER_INHERIT/);
+  assert.equal(f.counts().reads, 2);
+});
+
+test("lifecycle: disabling another project never refreshes the current project's healthy snapshot", async (t) => {
+  const f = await harness(t, "CURRENT_INDEX");
+  const first = await f.task();
+  assert.match(first.auto_memory, /CURRENT_INDEX/);
+  await f.project([system({ auto_memory: wrap(first.auto_memory) })]);
+  const before = f.counts();
+  await f.store.config.setProjectDisabled(`git-${"f".repeat(64)}`, true);
+  assert.deepEqual(await f.task(), first);
+  assert.equal(f.counts().reads, before.reads);
+  assert.equal(f.counts().resets, before.resets);
+  assert.deepEqual(f.controller.status(), { loaded: true });
+  await writeFile(f.path, "AFTER_OTHER_PROJECT_CHANGE");
+  assert.deepEqual(await f.task(), first);
+  assert.equal(f.counts().reads, before.reads);
+});
+
+test("lifecycle: global off still wins after project inheritance and a late session change never registers a snapshot", async (t) => {
+  const f = await harness(t, "GLOBAL_INDEX");
+  await f.task();
+  await f.store.config.setProjectDisabled(f.paths.projectId, true);
+  await f.store.config.setProjectDisabled(f.paths.projectId, false);
+  await f.store.config.setEnabled(false);
+  const projected = await f.project([system({ auto_memory: wrap("GLOBAL_INDEX") })]);
+  assert.equal(projected[0].role, "system");
+  if (projected[0].role !== "system") throw new Error();
+  assert.equal(projected[0].sections?.auto_memory, undefined);
+  await f.store.config.setEnabled(true);
+  const read = f.store.readBuffer.bind(f.store);
+  t.mock.method(f.store, "readBuffer", async (...args: Parameters<typeof read>) => {
+    const result = await read(...args);
+    await f.emit("session_start", { reason: "new" });
+    return result;
+  });
+  assert.equal((await f.task()).auto_memory, undefined);
+  assert.equal(f.controller.status().loaded, false);
+});
+
 test("lifecycle: first user task loads once; custom runs do not load; subsequent tasks reuse the exact snapshot", async (t) => {
   const f = await harness(t, "FIRST_INDEX");
   assert.equal((await f.task("custom")).auto_memory, undefined);
@@ -141,7 +197,7 @@ test("lifecycle: index 200-line/25KiB prefix and same-buffer coverage, including
     const f = await harness(t, text);
     const ranges: { buffer: Buffer; start: number; end: number }[] = [];
     const original = f.store.recordRange.bind(f.store);
-    f.store.recordRange = (path, buffer, start, end, generation) => { ranges.push({ buffer, start, end }); original(path, buffer, start, end, generation); };
+    f.store.recordRange = (path, buffer, start, end, generation) => { ranges.push({ buffer, start, end }); return original(path, buffer, start, end, generation); };
     const sections = await f.task();
     assert.equal(ranges.length, 0, "not granted until request projection succeeds");
     const expected = indexPrefix(text);
@@ -459,7 +515,7 @@ test("memoryGuidance snapshot covers types, correction, AGENTS dedup, secrets an
     "If a topic and its index description both carry the superseded preference", "do not keep conflicting old values beside a new record",
     "A temporary override for the current task does not by itself change a lasting preference",
     "no end-of-task summary or extra model call", "Read relevant topic files on demand", "read its complete current contents", "AFTER saving",
-    "first user task after session entry, re-enabling or /memory reload", "Reload invalidates old managed reads and pending edits or commits",
+    "first user task after session entry, re-enabling, project inheritance restoring effective memory, or /memory reload", "Reload invalidates old managed reads and pending edits or commits",
     "Historical conversation content remains"]) {
     assert.ok(text.includes(phrase), phrase);
   }

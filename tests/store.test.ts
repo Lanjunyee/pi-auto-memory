@@ -198,6 +198,37 @@ test("barriers prove both off/rename orderings across processes", { timeout: 15_
   }
 });
 
+test("barriers prove both project-disable/rename orderings across processes", { timeout: 15_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-memory-store-project-off-"));
+  const children: ReturnType<typeof fixtureChild>[] = [];
+  try {
+    const store = await makeStore(root);
+    const project = store.paths.projectId;
+    const path = join(store.paths.projectDir, "topic.md");
+    await store.write(path, "original");
+    const first = fixtureChild("tests/fixtures/store-worker.ts", [root, "existing", "before-project-off"]); children.push(first);
+    await first.next("ready"); first.go(); await first.next("renaming");
+    const off = fixtureChild("tests/fixtures/config-worker.ts", [root, "disable", project]); children.push(off);
+    first.go(); await first.next("done");
+    await off.next("locked");
+    assert.equal(await readFile(path, "utf8"), "before-project-off");
+    off.go(); await off.next("done");
+    assert.deepEqual(JSON.parse(await readFile(store.config.path, "utf8")).disabledProjects, [project]);
+    await store.config.setProjectDisabled(project, false);
+    const second = fixtureChild("tests/fixtures/store-worker.ts", [root, "existing", "after-project-off"]); children.push(second);
+    await second.next("ready");
+    const offFirst = fixtureChild("tests/fixtures/config-worker.ts", [root, "disable", project]); children.push(offFirst);
+    await offFirst.next("locked"); offFirst.go(); await offFirst.next("done");
+    second.go(); const error = await second.next("rejected");
+    assert.match(String(error.message), /Memory is off/);
+    assert.equal(await readFile(path, "utf8"), "before-project-off");
+    for (const child of children) await child.exited;
+  } finally {
+    for (const child of children) if (child.child.exitCode === null) child.child.kill();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("same-process write/host-factory edit use config -> project -> queue without reentrant deadlock", { timeout: 10_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "auto-memory-store-queue-"));
   try {

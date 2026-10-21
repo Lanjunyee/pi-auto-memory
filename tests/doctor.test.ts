@@ -73,7 +73,9 @@ test("normal new project reports defaults without creating configuration, direct
   assert.equal(find(checks, "runtime.pi").level, "ok", "current host must fall inside the declared range");
   assert.equal(find(checks, "runtime.scope").level, "ok");
   assert.equal(find(checks, "config").level, "ok");
-  assert.match(find(checks, "config").reason, /配置不存在；记忆默认开启/);
+  assert.match(find(checks, "config").reason, /配置不存在；全局记忆默认开启，项目默认继承/);
+  assert.equal(find(checks, "project.setting").level, "ok");
+  assert.match(find(checks, "project.setting").reason, /继承全局开关/);
   assert.equal(find(checks, "project.identity").level, "ok");
   assert.equal(find(checks, "project.identity").reason.includes(f.project.projectId), false);
   assert.equal(find(checks, "project.directory").level, "ok");
@@ -106,7 +108,9 @@ test("invalid, off and unknown configuration are reported separately from other 
     await writeFile(join(f.agentDir, "auto-memory.json"), '{"version":1,"enabled":false}');
     const checks = await diagnoseMemory(f.context(), { binary: stableBinary });
     assert.equal(find(checks, "config").level, "ok");
-    assert.match(find(checks, "config").reason, /记忆当前为关闭/);
+    assert.match(find(checks, "config").reason, /全局开关关闭/);
+    assert.equal(find(checks, "project.setting").level, "ok");
+    assert.match(find(checks, "project.setting").reason, /继承全局开关/);
     assert.equal(find(checks, "project.index").level, "ok");
   });
 });

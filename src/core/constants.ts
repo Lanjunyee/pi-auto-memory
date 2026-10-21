@@ -1,7 +1,8 @@
 export const INDEX_MAX_LINES = 200;
 export const INDEX_MAX_BYTES = 25 * 1024;
 export const INDEX_WARNING_RATIO = 0.9;
-export const CONFIG_VERSION = 1;
+export const CONFIG_VERSION_LEGACY = 1;
+export const CONFIG_VERSION_PROJECTS = 2;
 export const LOCK_STALE_MS = 10_000;
 export const LOCK_UPDATE_MS = 2_000;
 export const LOCK_RETRY_COUNT = 30;
