@@ -111,12 +111,12 @@ process.stdout.write(JSON.stringify({ resolved, cwd: process.cwd() }));
     assert.equal(resolved.resolved[name].root, family[name].root, `Resolver fell back to a development tree for ${name}`);
     assert.equal(inside(await realpath(host), resolved.resolved[name].root), true, `Resolver escaped the isolated host for ${name}`);
   }
-  const run = await runVerification(process.execPath, ['--import', loader, '--test', ...TEST_FILES], { cwd: copy, timeout: 600_000, env: { PATH: process.env.PATH, HOME: join(host, '..', 'regression-home'),
+  const run = await runVerification(process.execPath, ['--import', loader, '--test', '--test-reporter=spec', ...TEST_FILES], { cwd: copy, timeout: 600_000, env: { PATH: process.env.PATH, HOME: join(host, '..', 'regression-home'),
     TMPDIR: join(host, '..', 'regression-tmp'), PI_OFFLINE: '1', GIT_CONFIG_NOSYSTEM: '1' } });
   const summary = { tests: 0, pass: 0, fail: 0 };
   for (const match of run.matchAll(/^ℹ (tests|pass|fail) (\d+)$/gm)) summary[match[1]] = Number(match[2]);
-  assert.equal(summary.fail, 0, 'Host regression reported failing tests');
-  assert.ok(summary.tests > 0 && summary.pass === summary.tests, 'Host regression must execute every selected test file');
+  assert.equal(summary.fail, 0, `Host regression reported failing tests\n${run.slice(-4000)}`);
+  assert.ok(summary.tests > 0 && summary.pass === summary.tests, `Host regression must execute every selected test file\n${run.slice(-4000)}`);
   return {
     result: 'pass', host: hostVersion, files: TEST_FILES.length, summary,
     dependencies: Object.fromEntries(FAMILY.map((name) => [name, family[name].version])),

@@ -24,7 +24,8 @@ test('host regression is opt-in, rejects unknown options early and never edits t
   assert.match(text, /runHostRegression/);
   const regression = await import('node:fs/promises').then(fs => fs.readFile('scripts/host-regression.mjs', 'utf8'));
   for (const phrase of ['load.test.ts', 'host-contract.test.ts', 'registration.test.ts', 'lifecycle.test.ts', 'lifecycle-owner.test.ts',
-    'Resolver mixed versions', 'Resolver fell back to a development tree', 'Copied test/source file differs', 'pi-agent-core', 'pi-ai']) {
+    'Resolver mixed versions', 'Resolver fell back to a development tree', 'Copied test/source file differs', 'pi-agent-core', 'pi-ai',
+    '--test-reporter=spec']) {
     assert.ok(regression.includes(phrase), phrase);
   }
   assert.doesNotMatch(regression, /npm install|package-lock\.json|package\.json.*write/);
